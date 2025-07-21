@@ -11,6 +11,7 @@
     constructor(config = {}) {
       this.config = {
         apiEndpoint: 'https://trackflow-webapp-production.up.railway.app',
+        apiKey: null, // Add API key support
         debug: false,
         retryAttempts: 3,
         executionDelay: 100,
@@ -75,7 +76,14 @@
         const url = `${this.config.apiEndpoint}/api/workflows/active?url=${encodeURIComponent(window.location.href)}`;
         this.log(`📡 Fetching workflows from: ${url}`);
         
-        const response = await fetch(url);
+        // Prepare headers for API key authentication if available
+        const headers = {};
+        if (this.config.apiKey) {
+          headers['X-API-Key'] = this.config.apiKey;
+          this.log('🔑 Using API key authentication');
+        }
+        
+        const response = await fetch(url, { headers });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }

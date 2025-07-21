@@ -8,6 +8,7 @@ import WorkflowList from './components/WorkflowList';
 import WorkflowBuilder from './components/WorkflowBuilder';
 import Templates from './components/Templates';
 import Analytics from './components/Analytics';
+import ApiKeyManager from './components/ApiKeyManager';
 import Auth from './components/Auth';
 import { Loader2, AlertCircle } from 'lucide-react';
 
@@ -202,7 +203,20 @@ function AuthenticatedApp() {
       case 'executions':
         return <Analytics workflows={workflows} />;
       case 'settings':
-        return <div className="flex-1 p-8 bg-secondary-50">Settings coming soon...</div>;
+        return (
+          <div className="flex-1 bg-secondary-50">
+            <div className="max-w-4xl mx-auto p-8">
+              <div className="mb-8">
+                <h1 className="text-3xl font-medium text-secondary-900 tracking-tight">Settings</h1>
+                <p className="text-sm text-secondary-600">Manage your account and integration settings</p>
+              </div>
+              
+              <div className="bg-white border border-secondary-200 rounded-lg p-6">
+                <ApiKeyManager />
+              </div>
+            </div>
+          </div>
+        );
       case 'profile':
         return <div className="flex-1 p-8 bg-secondary-50">Profile coming soon...</div>;
       default:

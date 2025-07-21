@@ -22,6 +22,7 @@ export interface TrackingConfig {
   debug?: boolean;
   autoTrack?: boolean;
   customSelectors?: string[];
+  apiKey?: string;
 }
 
 /**
@@ -95,8 +96,23 @@ export function generateIntegrationCode(
  * Generate the simple head code for unified system
  */
 function generateUnifiedHeadCode(config: TrackingConfig): string {
+  const scriptUrl = config.trackingScriptUrl || 'https://trackflow-webapp-production.up.railway.app/api/unified-workflow-system.js';
+  
+  if (config.apiKey) {
+    return `<!-- Unified Workflow System with API Key - Add to <head> section -->
+<script src="${scriptUrl}"></script>
+<script>
+  // Configure API key for authenticated access
+  window.addEventListener('DOMContentLoaded', function() {
+    if (window.workflowSystem) {
+      window.workflowSystem.config.apiKey = '${config.apiKey}';
+    }
+  });
+</script>`;
+  }
+  
   return `<!-- Unified Workflow System - Add to <head> section -->
-<script src="${config.trackingScriptUrl || 'https://trackflow-webapp-production.up.railway.app/api/unified-workflow-system.js'}"></script>`;
+<script src="${scriptUrl}"></script>`;
 }
 
 /**
