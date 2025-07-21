@@ -5,12 +5,21 @@ import * as cheerio from 'cheerio';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { createClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Initialize Supabase client
+const supabaseUrl = process.env.SUPABASE_URL || 'https://nmnjnofagtcalfnkltqp.supabase.co';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tbmpub2ZhZ3RjYWxmbmtsdHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY5NTE4MjIsImV4cCI6MjA1MjUyNzgyMn0.7GBxGTmNhsF0vZNJ-jIBiSvGSMQGLCJq2uO3g6E_0Mo';
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+console.log('🔗 Supabase connection initialized');
 
 // CORS for all origins
 app.use(cors());
@@ -226,19 +235,237 @@ app.post('/api/workflows/trigger-check', async (req, res) => {
     
     console.log('🔄 Workflow trigger check:', workflowId, event?.type);
     
-    // For now, return no triggers (in production, check against database)
-    // This prevents errors but doesn't trigger workflows yet
+    if (!workflowId || !event) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing workflowId or event data',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Fetch the workflow from database
+    const { data: workflow, error: fetchError } = await supabase
+      .from('workflows_with_nodes')
+      .select('*')
+      .eq('id', workflowId)
+      .eq('is_active', true)
+      .eq('status', 'active')
+      .single();
+    
+    if (fetchError || !workflow) {
+      console.log('❌ Workflow not found or inactive:', workflowId);
+      return res.json({
+        triggered: false,
+        actions: [],
+        workflowId,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Parse nodes and connections
+    const nodes = workflow.nodes || [];
+    const connections = workflow.connections || [];
+    
+    // Find trigger nodes
+    const triggerNodes = nodes.filter(node => node.type === 'trigger');
+    let triggeredActions = [];
+    
+    // Evaluate each trigger
+    for (const trigger of triggerNodes) {
+      let isTriggered = false;
+      
+      // Evaluate trigger based on type
+      switch (trigger.name) {
+        case 'Device Type':
+          isTriggered = event.deviceType === trigger.config.deviceType;
+          break;
+          
+        case 'UTM Parameters':
+          if (event.utm) {
+            const { parameter, value, operator } = trigger.config;
+            const utmValue = event.utm[parameter];
+            
+            switch (operator) {
+              case 'equals':
+                isTriggered = utmValue === value;
+                break;
+              case 'contains':
+                isTriggered = utmValue && utmValue.includes(value);
+                break;
+              case 'exists':
+                isTriggered = Boolean(utmValue);
+                break;
+              default:
+                isTriggered = false;
+            }
+          }
+          break;
+          
+        case 'Page Visits':
+          isTriggered = event.visitCount >= (trigger.config.visitCount || 3);
+          break;
+          
+        case 'Time on Page':
+          const duration = trigger.config.duration || 30;
+          const unit = trigger.config.unit || 'seconds';
+          const thresholdMs = unit === 'minutes' ? duration * 60000 : duration * 1000;
+          isTriggered = event.timeOnPage >= thresholdMs;
+          break;
+          
+        case 'Scroll Depth':
+          isTriggered = event.scrollPercentage >= (trigger.config.percentage || 50);
+          break;
+          
+        case 'Element Click':
+          isTriggered = event.type === 'click' && 
+                       event.elementSelector === trigger.config.selector;
+          break;
+          
+        case 'Exit Intent':
+          isTriggered = event.type === 'exit_intent';
+          break;
+          
+        default:
+          console.warn('Unknown trigger type:', trigger.name);
+      }
+      
+      // If triggered, find connected actions
+      if (isTriggered) {
+        console.log(`✅ Trigger matched: ${trigger.name}`);
+        
+        // Find all actions connected to this trigger
+        const connectedActionIds = connections
+          .filter(conn => conn.sourceNodeId === trigger.id)
+          .map(conn => conn.targetNodeId);
+        
+        const connectedActions = nodes
+          .filter(node => node.type === 'action' && connectedActionIds.includes(node.id))
+          .map(action => transformActionForClient(action, trigger.name));
+        
+        triggeredActions = [...triggeredActions, ...connectedActions];
+      }
+    }
+    
+    // Remove duplicates
+    const uniqueActions = Array.from(new Map(
+      triggeredActions.map(action => [`${action.type}-${action.target}`, action])
+    ).values());
+    
+    console.log(`🎯 Workflow ${workflowId}: ${uniqueActions.length} actions triggered`);
+    
     res.json({
-      triggered: false,
-      actions: [],
+      success: true,
+      triggered: uniqueActions.length > 0,
+      actions: uniqueActions,
       workflowId,
       timestamp: new Date().toISOString()
     });
+    
   } catch (error) {
     console.error('❌ Workflow trigger check error:', error);
-    res.status(500).json({ success: false, error: 'Failed to check workflow triggers' });
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to check workflow triggers',
+      timestamp: new Date().toISOString()
+    });
   }
 });
+
+// Helper function to transform database action to client format
+function transformActionForClient(action, triggerName) {
+  const baseAction = {
+    delay: 0,
+    triggeredBy: triggerName
+  };
+  
+  switch (action.name) {
+    case 'Replace Text':
+      return {
+        ...baseAction,
+        type: 'replace_text',
+        target: action.config.selector,
+        newText: action.config.newText,
+        originalText: action.config.originalText,
+        animation: 'fade'
+      };
+      
+    case 'Hide Element':
+      return {
+        ...baseAction,
+        type: 'hide_element',
+        target: action.config.selector,
+        animation: action.config.animation || 'fade'
+      };
+      
+    case 'Show Element':
+      return {
+        ...baseAction,
+        type: 'show_element',
+        target: action.config.selector,
+        animation: action.config.animation || 'fade'
+      };
+      
+    case 'Modify CSS':
+      return {
+        ...baseAction,
+        type: 'modify_css',
+        target: action.config.selector,
+        property: action.config.property,
+        value: action.config.value
+      };
+      
+    case 'Add Class':
+      return {
+        ...baseAction,
+        type: 'add_class',
+        target: action.config.selector,
+        className: action.config.className
+      };
+      
+    case 'Remove Class':
+      return {
+        ...baseAction,
+        type: 'remove_class',
+        target: action.config.selector,
+        className: action.config.className
+      };
+      
+    case 'Display Overlay':
+      return {
+        ...baseAction,
+        type: 'display_overlay',
+        content: action.config.content,
+        animation: action.config.animation || 'fade',
+        position: action.config.position || 'center'
+      };
+      
+    case 'Redirect':
+      return {
+        ...baseAction,
+        type: 'redirect',
+        url: action.config.url,
+        delay: action.config.delay || 0,
+        newTab: action.config.newTab || false
+      };
+      
+    case 'Custom Event':
+      return {
+        ...baseAction,
+        type: 'custom_event',
+        eventName: action.config.eventName,
+        eventData: action.config.eventData
+      };
+      
+    default:
+      console.warn('Unknown action type:', action.name);
+      return {
+        ...baseAction,
+        type: action.name.toLowerCase().replace(/ /g, '_'),
+        target: action.config.selector || '',
+        config: action.config
+      };
+  }
+}
 
 // Get active workflows endpoint
 app.get('/api/workflows/active', async (req, res) => {
@@ -247,16 +474,47 @@ app.get('/api/workflows/active', async (req, res) => {
     
     console.log('📋 Fetching active workflows for:', url);
     
-    // For now, return empty workflows (in production, fetch from database)
+    // Query Supabase for active workflows
+    const { data: workflows, error } = await supabase
+      .from('workflows_with_nodes')
+      .select('*')
+      .eq('is_active', true)
+      .eq('status', 'active');
+    
+    if (error) {
+      console.error('❌ Supabase error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch workflows from database',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Filter workflows that match the URL
+    const activeWorkflows = workflows.filter(workflow => {
+      // Match all pages with wildcard
+      if (workflow.target_url === '*') return true;
+      // Match specific URLs
+      if (workflow.target_url && url && url.includes(workflow.target_url)) return true;
+      return false;
+    });
+    
+    console.log(`✅ Found ${activeWorkflows.length} active workflows for URL: ${url}`);
+    
     res.json({
       success: true,
-      workflows: [],
+      workflows: activeWorkflows,
+      count: activeWorkflows.length,
       url,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('❌ Error fetching workflows:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch workflows' });
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch workflows',
+      timestamp: new Date().toISOString()
+    });
   }
 });
 

@@ -20,19 +20,42 @@ export interface WorkflowData {
 
 // Convert Supabase workflow data to frontend Workflow type
 function convertToWorkflow(data: WorkflowData): Workflow {
+  // Parse nodes and connections if they're strings
+  let nodes = data.nodes || [];
+  let connections = data.connections || [];
+  
+  // Handle case where nodes/connections might be JSON strings
+  if (typeof nodes === 'string') {
+    try {
+      nodes = JSON.parse(nodes);
+    } catch (e) {
+      console.error('Failed to parse nodes:', e);
+      nodes = [];
+    }
+  }
+  
+  if (typeof connections === 'string') {
+    try {
+      connections = JSON.parse(connections);
+    } catch (e) {
+      console.error('Failed to parse connections:', e);
+      connections = [];
+    }
+  }
+  
   return {
     id: data.id,
     name: data.name,
     description: data.description || '',
     isActive: data.is_active,
     status: data.status,
-    executions: data.executions,
-    lastRun: data.last_run ? new Date(data.last_run) : undefined,
+    targetUrl: data.target_url || '*',
+    nodes: nodes,
+    connections: connections,
     createdAt: new Date(data.created_at),
     updatedAt: new Date(data.updated_at),
-    targetUrl: data.target_url,
-    nodes: data.nodes || [],
-    connections: data.connections || []
+    executions: data.executions || 0,
+    lastRun: data.last_run ? new Date(data.last_run) : undefined
   }
 }
 
@@ -243,6 +266,25 @@ export class WorkflowService {
     } catch (error) {
       console.error('Error in getUserApiKeys:', error)
       throw error
+    }
+  }
+
+  // Get a workflow by its ID (with nodes and connections)
+  static async getWorkflowById(workflowId: string): Promise<Workflow | null> {
+    try {
+      const { data, error } = await supabase
+        .from('workflows_with_nodes')
+        .select('*')
+        .eq('id', workflowId)
+        .single();
+      if (error || !data) {
+        console.error('Error fetching workflow by ID:', error);
+        return null;
+      }
+      return convertToWorkflow(data);
+    } catch (error) {
+      console.error('Error in getWorkflowById:', error);
+      return null;
     }
   }
 } 

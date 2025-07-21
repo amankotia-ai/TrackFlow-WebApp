@@ -253,31 +253,94 @@
     
     // Execute individual action
     function executeAction(action) {
-      const elements = document.querySelectorAll(action.target);
+      // Handle both old format (type/target) and new format (name/config)
+      const actionType = action.type || (action.name && action.name.toLowerCase().replace(/ /g, '_'));
+      const targetSelector = action.target || (action.config && action.config.selector);
       
-      if (elements.length === 0) {
-        console.warn('⚠️ Action target not found:', action.target);
+      if (!targetSelector) {
+        console.warn('⚠️ Action missing target selector:', action);
         return;
       }
       
-      console.log(`🎬 Executing action: ${action.type} on ${elements.length} element(s) - ${action.triggeredBy || 'Unknown trigger'}`);
+      const elements = document.querySelectorAll(targetSelector);
       
-      elements.forEach(element => {
-        switch (action.type) {
-          case 'show_element':
+      if (elements.length === 0) {
+        console.warn('⚠️ Action target not found:', targetSelector);
+        return;
+      }
+      
+      console.log(`🎬 Executing action: ${actionType} on ${elements.length} element(s) - ${action.triggeredBy || 'Unknown trigger'}`);
+      
+      switch (actionType) {
+        case 'replace_text':
+          elements.forEach(element => {
+            const newText = action.newText || (action.config && action.config.newText);
+            const originalText = action.originalText || (action.config && action.config.originalText);
+            
+            if (originalText && element.textContent.includes(originalText)) {
+              element.textContent = element.textContent.replace(originalText, newText);
+            } else if (newText) {
+              element.textContent = newText;
+            }
+          });
+          break;
+          
+        case 'hide_element':
+          elements.forEach(element => {
+            const animation = action.animation || (action.config && action.config.animation) || 'fade';
+            if (animation === 'fade') {
+              element.style.transition = 'opacity 0.3s ease';
+              element.style.opacity = '0';
+              setTimeout(() => element.style.display = 'none', 300);
+            } else {
+              element.style.display = 'none';
+            }
+          });
+          break;
+          
+        case 'show_element':
+          elements.forEach(element => {
+            const animation = action.animation || (action.config && action.config.animation) || 'fade';
             element.style.display = 'block';
-            if (action.animation === 'fade') {
+            if (animation === 'fade') {
               element.style.opacity = '0';
               element.style.transition = 'opacity 0.3s ease';
-              setTimeout(() => { element.style.opacity = '1'; }, 10);
+              setTimeout(() => element.style.opacity = '1', 10);
             }
-            console.log('✅ Action executed: Show element', action.target);
-            break;
-            
-          default:
-            console.warn('⚠️ Unknown action type:', action.type);
-        }
-      });
+          });
+          break;
+          
+        case 'modify_css':
+          elements.forEach(element => {
+            const property = action.property || (action.config && action.config.property);
+            const value = action.value || (action.config && action.config.value);
+            if (property && value) {
+              element.style[property] = value;
+            }
+          });
+          break;
+          
+        case 'add_class':
+          elements.forEach(element => {
+            const className = action.className || (action.config && action.config.className);
+            if (className) {
+              element.classList.add(className);
+            }
+          });
+          break;
+          
+        case 'display_overlay':
+          const content = action.content || (action.config && action.config.content) || '<div>Overlay Content</div>';
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;color:white;';
+          overlay.innerHTML = content;
+          overlay.onclick = () => overlay.remove();
+          document.body.appendChild(overlay);
+          break;
+          
+        default:
+          console.warn('⚠️ Unknown action type:', actionType);
+      }
     }
   </script>
   
