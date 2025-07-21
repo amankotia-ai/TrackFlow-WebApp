@@ -137,35 +137,31 @@ function generateBodyCode(config: TrackingConfig, workflow: Workflow): string {
 
   return `<!-- Element Tracking Initialization - Add before closing </body> tag -->
 <script>
-  // Initialize workflow-specific tracking
+  // Wait for elementTracker and config to be ready before initializing workflow logic
   document.addEventListener('DOMContentLoaded', function() {
-    if (window.elementTracker) {
-      console.log('🎯 Workflow Integration: Initializing tracking for "${workflow.name}"');
-      
-      ${workflowTriggers}
-      
-      ${customTracking}
-      
-      // Setup workflow trigger checking
-      setupWorkflowTriggers('${workflow.id}');
-      
-      console.log('✅ Workflow Integration: Setup complete for "${workflow.name}"');
-    } else {
-      console.error('❌ Element Tracker not found. Make sure the tracking script is loaded.');
+    function tryInitWorkflow() {
+      if (window.elementTracker && window.ELEMENT_TRACKING_CONFIG && window.ELEMENT_TRACKING_CONFIG.workflowId) {
+        console.log('🎯 Workflow Integration: Initializing tracking for "${workflow.name}"');
+        ${workflowTriggers}
+        ${customTracking}
+        // Setup workflow trigger checking
+        setupWorkflowTriggers('${workflow.id}');
+        console.log('✅ Workflow Integration: Setup complete for "${workflow.name}"');
+      } else {
+        setTimeout(tryInitWorkflow, 100); // Retry every 100ms
+      }
     }
+    tryInitWorkflow();
   });
 
   // Function to check workflow triggers
   function setupWorkflowTriggers(workflowId) {
     if (!window.elementTracker) return;
-    
     // Override the event processing to check triggers
     const originalAddEvent = window.elementTracker.addEvent.bind(window.elementTracker);
-    
     window.elementTracker.addEvent = function(event) {
       // Call original event processing
       originalAddEvent(event);
-      
       // Check if this event should trigger any workflows
       checkWorkflowTrigger(event, workflowId);
     };
