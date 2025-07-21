@@ -12,7 +12,7 @@
       this.config = {
         apiEndpoint: 'https://trackflow-webapp-production.up.railway.app',
         apiKey: null, // Add API key support
-        debug: false,
+        debug: true, // Enable debug by default to help troubleshooting
         retryAttempts: 3,
         executionDelay: 100,
         hideContentDuringInit: true,
@@ -32,6 +32,9 @@
       this.loadingIndicatorShown = false;
       this.elementsToWaitFor = new Set(); // Track elements we're waiting for
       this.completedModifications = new Set(); // Track completed modifications
+      this.processedSelectors = new Set(); // Track processed selectors to prevent duplicates
+      this.selectorRulesMap = new Map(); // Map selectors to rules for efficient processing
+      this.mutationObserver = null; // For dynamic content tracking
       
       // Auto-hide content if enabled and anti-flicker script hasn't already done it
       if (this.config.hideContentDuringInit && !window.unifiedWorkflowAntiFlicker?.isContentHidden()) {
@@ -39,6 +42,30 @@
       }
       
       this.log('🎯 Unified Workflow System: Starting...');
+    }
+
+    /**
+     * Enhanced logging with proper debug mode check
+     */
+    log(message, level = 'info', data = null) {
+      if (!this.config.debug && level !== 'error') return;
+      
+      const prefix = '🎯 Unified Workflow System:';
+      const timestamp = new Date().toLocaleTimeString();
+      
+      switch (level) {
+        case 'error':
+          console.error(`${prefix} [${timestamp}] ❌ ${message}`, data || '');
+          break;
+        case 'warning':
+          console.warn(`${prefix} [${timestamp}] ⚠️ ${message}`, data || '');
+          break;
+        case 'success':
+          console.log(`${prefix} [${timestamp}] ✅ ${message}`, data || '');
+          break;
+        default:
+          console.log(`${prefix} [${timestamp}] ${message}`, data || '');
+      }
     }
 
     /**
@@ -53,14 +80,20 @@
       try {
         this.log('🚀 Initializing unified workflow system...');
         
-        // Fetch all active workflows
+        // Fetch all active workflows first
         await this.fetchWorkflows();
         
-        // Process immediate triggers (page load, device type, etc.)
+        // Execute priority actions immediately (like utm-magic.js priority execution)
+        await this.executePriorityActions();
+        
+        // Process all immediate triggers (page load, device type, etc.)
         await this.processImmediateTriggers();
         
         // Set up event listeners for dynamic triggers
         this.setupEventListeners();
+        
+        // Set up mutation observer for dynamic content
+        this.setupMutationObserver();
         
         // Wait for all pending element operations to complete
         await this.waitForAllModifications();
@@ -119,6 +152,91 @@
     }
 
     /**
+     * Set up mutation observer for dynamic content
+     */
+    setupMutationObserver() {
+      // Only set up if we have content replacement rules
+      const hasContentRules = Array.from(this.selectorRulesMap.keys()).some(
+        selector => selector.includes('button') || selector.includes('input') || selector.includes('a')
+      );
+      
+      if (!hasContentRules) {
+        this.log('No content replacement rules found, skipping mutation observer');
+        return;
+      }
+      
+      this.mutationObserver = new MutationObserver(mutations => {
+        let shouldReapply = false;
+        
+        mutations.forEach(mutation => {
+          if (mutation.type === 'childList' && mutation.addedNodes.length) {
+            mutation.addedNodes.forEach(node => {
+              if (node.nodeType !== 1) return; // Not an element
+              
+              // Check if this is a relevant element
+              if (this.isRelevantElement(node)) {
+                shouldReapply = true;
+              }
+            });
+          }
+        });
+        
+        if (shouldReapply) {
+          this.log('New relevant elements detected, reapplying rules');
+          this.reapplyContentRules();
+        }
+      });
+      
+      // Start observing
+      if (document.body) {
+        this.mutationObserver.observe(document.body, { 
+          childList: true, 
+          subtree: true 
+        });
+        this.log('Mutation observer setup for dynamic content');
+      }
+    }
+
+    /**
+     * Check if an element is relevant for our rules
+     */
+    isRelevantElement(node) {
+      if (!node.tagName) return false;
+      
+      const tagName = node.tagName.toLowerCase();
+      const relevantTags = ['button', 'input', 'a', 'div', 'span', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+      
+      if (relevantTags.includes(tagName)) return true;
+      
+      // Check if it contains relevant elements
+      if (node.querySelectorAll) {
+        return node.querySelectorAll('button, input, a, [class*="btn"], [class*="cta"]').length > 0;
+      }
+      
+      return false;
+    }
+
+    /**
+     * Reapply content rules to new elements
+     */
+    reapplyContentRules() {
+      if (this.selectorRulesMap.size === 0) return;
+      
+      let appliedCount = 0;
+      
+      this.selectorRulesMap.forEach((rule, selector) => {
+        // Don't skip already processed selectors for dynamic content
+        if (this.applySingleSelector(selector, rule, false)) {
+          appliedCount++;
+        }
+      });
+      
+      if (appliedCount > 0) {
+        this.log(`Reapplied ${appliedCount} rules to new elements`);
+      }
+    }
+
+    /**
      * Process triggers that fire immediately on page load
      */
     async processImmediateTriggers() {
@@ -132,7 +250,45 @@
         ...this.userContext
       };
       
+      this.log(`🚀 Processing immediate triggers with data:`, 'info', eventData);
       await this.processWorkflows(eventData);
+    }
+
+    /**
+     * Priority execution for critical actions that need to run ASAP
+     */
+    async executePriorityActions() {
+      this.log('⚡ Executing priority content replacement actions...');
+      
+      // Execute content replacement actions immediately for visible elements
+      const priorityActions = [];
+      
+      this.workflows.forEach(workflow => {
+        if (!workflow.is_active) return;
+        
+        const triggerNodes = workflow.nodes?.filter(node => node.type === 'trigger') || [];
+        
+        triggerNodes.forEach(trigger => {
+          // Check immediate triggers (device type, UTM, page load)
+          const immediateEventData = {
+            eventType: 'page_load',
+            deviceType: this.pageContext.deviceType,
+            utm: this.pageContext.utm
+          };
+          
+          if (this.evaluateTrigger(trigger, immediateEventData)) {
+            const actions = this.getConnectedActions(workflow, trigger.id);
+            const contentActions = actions.filter(action => action.name === 'Replace Text');
+            priorityActions.push(...contentActions);
+          }
+        });
+      });
+      
+      if (priorityActions.length > 0) {
+        this.log(`🎯 Found ${priorityActions.length} priority content actions`);
+        const promises = priorityActions.map(action => this.executeAction(action));
+        await Promise.all(promises);
+      }
     }
 
     /**
@@ -214,10 +370,18 @@
         
         for (const trigger of triggerNodes) {
           if (this.evaluateTrigger(trigger, eventData)) {
-            this.log(`🎯 Workflow triggered: ${workflow.name} by ${trigger.name}`);
+            this.log(`🎯 Workflow triggered: ${workflow.name} by ${trigger.name}`, 'success');
             
             // Find and execute connected actions
             const actions = this.getConnectedActions(workflow, trigger.id);
+            
+            // Store action selectors in our mapping for mutation observer
+            actions.forEach(action => {
+              if (action.name === 'Replace Text' && action.config?.selector) {
+                this.selectorRulesMap.set(action.config.selector, action.config);
+              }
+            });
+            
             await this.executeActions(actions);
           }
         }
@@ -287,7 +451,23 @@
      * Execute a list of actions
      */
     async executeActions(actions) {
-      for (const action of actions) {
+      if (!actions?.length) return;
+      
+      this.log(`🎬 Executing ${actions.length} actions`);
+      
+      // Execute content replacement actions immediately in parallel for better performance
+      const contentActions = actions.filter(action => action.name === 'Replace Text');
+      const otherActions = actions.filter(action => action.name !== 'Replace Text');
+      
+      // Execute content replacements in parallel for speed
+      if (contentActions.length > 0) {
+        this.log(`⚡ Executing ${contentActions.length} content replacement actions in parallel`);
+        const contentPromises = contentActions.map(action => this.executeAction(action));
+        await Promise.all(contentPromises);
+      }
+      
+      // Execute other actions sequentially with delay
+      for (const action of otherActions) {
         await this.executeAction(action);
         
         // Add delay between actions if configured
@@ -367,28 +547,122 @@
         // Wait for elements to be available
         await this.waitForElement(config.selector);
         
-        const elements = document.querySelectorAll(config.selector);
-        let modifiedCount = 0;
-        
-        elements.forEach(element => {
-          if (config.originalText && element.textContent.includes(config.originalText)) {
-            element.textContent = element.textContent.replace(config.originalText, config.newText);
-            modifiedCount++;
-          } else if (config.newText) {
-            element.textContent = config.newText;
-            modifiedCount++;
-          }
+        // Use the robust replacement logic from utm-magic.js
+        const success = this.applySingleSelector(config.selector, {
+          newText: config.newText,
+          originalText: config.originalText
         });
         
-        // Mark this modification as complete
-        this.completedModifications.add(`replaceText:${config.selector}`);
-        this.log(`✅ Text replaced in ${modifiedCount}/${elements.length} elements (${config.selector})`);
-        
-        return { success: true, modified: modifiedCount, total: elements.length };
+        if (success) {
+          this.completedModifications.add(`replaceText:${config.selector}`);
+          this.log(`✅ Text replaced successfully (${config.selector})`, 'success');
+          return { success: true };
+        } else {
+          this.log(`⚠️ No elements found or replacement failed (${config.selector})`, 'warning');
+          return { success: false, error: 'No elements found' };
+        }
         
       } catch (error) {
         this.log(`❌ Text replacement failed for ${config.selector}: ${error.message}`, 'error');
         return { success: false, error: error.message };
+      }
+    }
+
+    /**
+     * Robust content replacement function adapted from utm-magic.js
+     * Handles different element types properly
+     */
+    replaceContent(element, config) {
+      if (!element || (!config.newText && config.newText !== '')) return false;
+      
+      try {
+        const tagName = element.tagName.toLowerCase();
+        const newText = config.newText;
+        const originalText = config.originalText;
+        
+        this.log(`🔄 Replacing content in ${tagName} element`, 'info', { newText, originalText });
+        
+        // Handle buttons
+        if (tagName === 'button' || (tagName === 'input' && (element.type === 'submit' || element.type === 'button'))) {
+          if (originalText && element.textContent.includes(originalText)) {
+            element.textContent = element.textContent.replace(originalText, newText);
+          } else {
+            element.textContent = newText;
+          }
+        }
+        // Handle inputs
+        else if (tagName === 'input') {
+          if (element.type === 'text' || element.type === 'email' || element.type === 'tel' || element.type === 'number') {
+            element.value = newText || '';
+            element.setAttribute('placeholder', newText || '');
+          }
+        }
+        // Handle links
+        else if (tagName === 'a') {
+          if (newText && (newText.startsWith('http') || newText.startsWith('/') || newText.includes('://'))) {
+            element.setAttribute('href', newText);
+          } else {
+            if (originalText && element.innerHTML.includes(originalText)) {
+              element.innerHTML = element.innerHTML.replace(originalText, newText || '');
+            } else {
+              element.innerHTML = newText || '';
+            }
+          }
+        }
+        // Default for div, span, p, h1-h6, etc.
+        else {
+          if (originalText && element.innerHTML.includes(originalText)) {
+            element.innerHTML = element.innerHTML.replace(originalText, newText || '');
+          } else {
+            element.innerHTML = newText || '';
+          }
+        }
+        
+        return true;
+      } catch (e) {
+        this.log(`Error replacing content: ${e.message}`, 'error');
+        return false;
+      }
+    }
+
+    /**
+     * Apply a single selector efficiently (adapted from utm-magic.js)
+     */
+    applySingleSelector(selector, config, preventDuplicates = true) {
+      const selectorKey = `${selector}-${JSON.stringify(config)}`;
+      
+      if (preventDuplicates && this.processedSelectors.has(selectorKey)) {
+        this.log(`Skipping already processed selector: ${selector}`);
+        return true; // Already processed
+      }
+      
+      try {
+        const elements = document.querySelectorAll(selector);
+        if (!elements?.length) {
+          this.log(`No elements found for selector: ${selector}`, 'warning');
+          return false;
+        }
+        
+        let successCount = 0;
+        
+        elements.forEach(element => {
+          if (this.replaceContent(element, config)) {
+            successCount++;
+          }
+        });
+        
+        if (successCount > 0) {
+          if (preventDuplicates) {
+            this.processedSelectors.add(selectorKey);
+          }
+          this.log(`✅ Applied content replacement to ${successCount}/${elements.length} elements (${selector})`, 'success');
+          return true;
+        }
+        
+        return false;
+      } catch (e) {
+        this.log(`Error applying selector ${selector}: ${e.message}`, 'error');
+        return false;
       }
     }
 
@@ -397,19 +671,30 @@
         await this.waitForElement(config.selector);
         
         const elements = document.querySelectorAll(config.selector);
+        if (!elements?.length) {
+          this.log(`⚠️ No elements found to hide: ${config.selector}`, 'warning');
+          return { success: false, error: 'No elements found' };
+        }
+        
+        let hiddenCount = 0;
         elements.forEach(element => {
           if (config.animation === 'fade') {
             element.style.transition = 'opacity 0.3s ease';
             element.style.opacity = '0';
-            setTimeout(() => element.style.display = 'none', 300);
+            setTimeout(() => {
+              element.style.display = 'none';
+              this.log(`🫥 Element faded out: ${element.tagName}.${element.className}`);
+            }, 300);
           } else {
             element.style.display = 'none';
+            this.log(`🫥 Element hidden: ${element.tagName}.${element.className}`);
           }
+          hiddenCount++;
         });
         
         this.completedModifications.add(`hideElement:${config.selector}`);
-        this.log(`✅ Hidden ${elements.length} elements (${config.selector})`);
-        return { success: true, hidden: elements.length };
+        this.log(`✅ Hidden ${hiddenCount} elements (${config.selector})`, 'success');
+        return { success: true, hidden: hiddenCount };
         
       } catch (error) {
         this.log(`❌ Hide element failed for ${config.selector}: ${error.message}`, 'error');
@@ -771,36 +1056,42 @@
     delay(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
     }
-
-    log(message, level = 'info') {
-      if (!this.config.debug) return;
-      
-      const timestamp = new Date().toLocaleTimeString();
-      const styles = {
-        info: 'color: #2196F3',
-        success: 'color: #4CAF50', 
-        warning: 'color: #FF9800',
-        error: 'color: #F44336'
-      };
-      
-      console.log(`%c[${timestamp}] ${message}`, styles[level] || styles.info);
-    }
   }
 
   // Global API
   window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
 
-  // Auto-initialize if not already done
+  // Auto-initialize if not already done (like utm-magic.js)
   if (!window.workflowSystem) {
     window.workflowSystem = new UnifiedWorkflowSystem();
     
-    // Initialize when DOM is ready
+    // Priority initialization for immediate content replacement
+    const priorityInit = async () => {
+      try {
+        // Fetch workflows and execute priority actions immediately
+        await window.workflowSystem.fetchWorkflows();
+        await window.workflowSystem.executePriorityActions();
+      } catch (error) {
+        console.error('🎯 Priority initialization failed:', error);
+      }
+    };
+    
+    // Initialize when DOM is ready, with priority execution
     if (document.readyState === 'loading') {
+      // Use requestIdleCallback with timeout for priority if available
+      if (window.requestIdleCallback) {
+        requestIdleCallback(() => priorityInit(), { timeout: 500 });
+      } else {
+        setTimeout(priorityInit, 0);
+      }
+      
+      // Full initialization on DOMContentLoaded
       document.addEventListener('DOMContentLoaded', () => {
         window.workflowSystem.initialize();
-      });
+      }, { once: true });
     } else {
-      window.workflowSystem.initialize();
+      // Document already loaded - run priority init then full init
+      priorityInit().then(() => window.workflowSystem.initialize());
     }
   }
 

@@ -375,15 +375,73 @@
       await this.waitForElement(config.selector);
       
       const elements = document.querySelectorAll(config.selector);
+      if (!elements?.length) {
+        console.warn(`🎯 No elements found for selector: ${config.selector}`);
+        return;
+      }
+      
+      let successCount = 0;
       elements.forEach(element => {
-        if (config.originalText && element.textContent.includes(config.originalText)) {
-          element.textContent = element.textContent.replace(config.originalText, config.newText);
-        } else {
-          element.textContent = config.newText;
+        if (this.replaceContentRobust(element, config)) {
+          successCount++;
         }
       });
       
-      this.logActionExecution('Replace Text', config.selector, `Text changed to: ${config.newText}`);
+      this.logActionExecution('Replace Text', config.selector, `Text changed in ${successCount}/${elements.length} elements to: ${config.newText}`);
+    }
+
+    /**
+     * Robust content replacement adapted from utm-magic.js
+     */
+    replaceContentRobust(element, config) {
+      if (!element || (!config.newText && config.newText !== '')) return false;
+      
+      try {
+        const tagName = element.tagName.toLowerCase();
+        const newText = config.newText;
+        const originalText = config.originalText;
+        
+        // Handle buttons
+        if (tagName === 'button' || (tagName === 'input' && (element.type === 'submit' || element.type === 'button'))) {
+          if (originalText && element.textContent.includes(originalText)) {
+            element.textContent = element.textContent.replace(originalText, newText);
+          } else {
+            element.textContent = newText;
+          }
+        }
+        // Handle inputs
+        else if (tagName === 'input') {
+          if (element.type === 'text' || element.type === 'email' || element.type === 'tel' || element.type === 'number') {
+            element.value = newText || '';
+            element.setAttribute('placeholder', newText || '');
+          }
+        }
+        // Handle links
+        else if (tagName === 'a') {
+          if (newText && (newText.startsWith('http') || newText.startsWith('/') || newText.includes('://'))) {
+            element.setAttribute('href', newText);
+          } else {
+            if (originalText && element.innerHTML.includes(originalText)) {
+              element.innerHTML = element.innerHTML.replace(originalText, newText || '');
+            } else {
+              element.innerHTML = newText || '';
+            }
+          }
+        }
+        // Default for div, span, p, h1-h6, etc.
+        else {
+          if (originalText && element.innerHTML.includes(originalText)) {
+            element.innerHTML = element.innerHTML.replace(originalText, newText || '');
+          } else {
+            element.innerHTML = newText || '';
+          }
+        }
+        
+        return true;
+      } catch (e) {
+        console.error('🎯 Error replacing content:', e);
+        return false;
+      }
     }
 
     async executeHideElement(config) {
