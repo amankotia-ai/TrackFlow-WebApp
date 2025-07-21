@@ -9,7 +9,9 @@ import {
   Copy,
   Loader2,
   Check,
-  Code2
+  Code2,
+  Pause,
+  Edit
 } from 'lucide-react';
 import { Workflow, WorkflowNode } from '../types/workflow';
 import NodeLibrary from './NodeLibrary';
@@ -275,6 +277,45 @@ const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
         
         {/* Floating Action Buttons - Right side */}
         <div className="flex items-center space-x-3 pointer-events-auto">
+          {/* Workflow Status Toggle */}
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-secondary-600">Status:</span>
+            <button
+              onClick={() => {
+                const newStatus = currentWorkflow.status === 'active' ? 'draft' : 'active';
+                setCurrentWorkflow(prev => ({
+                  ...prev,
+                  status: newStatus,
+                  isActive: newStatus === 'active'
+                }));
+              }}
+              className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border transition-colors ${
+                currentWorkflow.status === 'active'
+                  ? 'bg-green-100 text-green-800 border-green-200 hover:bg-green-200'
+                  : currentWorkflow.status === 'paused'
+                  ? 'bg-yellow-100 text-yellow-800 border-yellow-200 hover:bg-yellow-200'
+                  : 'bg-secondary-100 text-secondary-800 border-secondary-200 hover:bg-secondary-200'
+              }`}
+            >
+              {currentWorkflow.status === 'active' ? (
+                <>
+                  <Play className="w-3 h-3 mr-1" />
+                  Active
+                </>
+              ) : currentWorkflow.status === 'paused' ? (
+                <>
+                  <Pause className="w-3 h-3 mr-1" />
+                  Paused
+                </>
+              ) : (
+                <>
+                  <Edit className="w-3 h-3 mr-1" />
+                  Draft
+                </>
+              )}
+            </button>
+          </div>
+          
           {/* Integration Button - Show when URL is set and scraping is complete */}
           {url && isDone && scrapingResult?.success && (
             <button
@@ -292,9 +333,15 @@ const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
             <Save className="w-4 h-4" />
             <span>Save</span>
           </button>
-          <button className="flex items-center space-x-2 px-4 py-2 bg-green-600/90 backdrop-blur-sm text-white hover:bg-green-700 transition-colors font-medium text-sm rounded-lg shadow-sm">
+          <button 
+            className={`flex items-center space-x-2 px-4 py-2 backdrop-blur-sm text-white transition-colors font-medium text-sm rounded-lg shadow-sm ${
+              currentWorkflow.status === 'active' 
+                ? 'bg-green-600/90 hover:bg-green-700' 
+                : 'bg-secondary-600/90 hover:bg-secondary-700'
+            }`}
+          >
             <Play className="w-4 h-4" />
-            <span>Test</span>
+            <span>{currentWorkflow.status === 'active' ? 'Test Live' : 'Test Draft'}</span>
           </button>
         </div>
       </div>

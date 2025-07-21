@@ -125,6 +125,19 @@ function AuthenticatedApp() {
     setSelectedWorkflow(importedWorkflow);
   };
 
+  const handleWorkflowUpdate = (updatedWorkflow: Workflow) => {
+    // Update the workflow in the list
+    setWorkflows(prev => {
+      const index = prev.findIndex(w => w.id === updatedWorkflow.id);
+      if (index >= 0) {
+        const updated = [...prev];
+        updated[index] = updatedWorkflow;
+        return updated;
+      }
+      return prev;
+    });
+  };
+
   const renderContent = () => {
     // Show loading state
     if (loading) {
@@ -176,6 +189,7 @@ function AuthenticatedApp() {
             onWorkflowSelect={handleWorkflowSelect}
             onCreateWorkflow={handleCreateWorkflow}
             onWorkflowImport={handleWorkflowImport}
+            onWorkflowUpdate={handleWorkflowUpdate}
           />
         );
       case 'templates':

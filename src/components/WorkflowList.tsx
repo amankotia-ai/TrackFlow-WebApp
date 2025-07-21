@@ -9,35 +9,42 @@ import {
   Download,
   RefreshCw,
   Upload,
-  Trash2
+  Trash2,
+  Check,
+  X,
+  Settings
 } from 'lucide-react';
 import { Workflow } from '../types/workflow';
 import { StorageService } from '../services/storageService';
+import { WorkflowService } from '../services/workflowService';
 
 interface WorkflowListProps {
   workflows: Workflow[];
   onWorkflowSelect: (workflow: Workflow) => void;
   onCreateWorkflow: () => void;
   onWorkflowImport?: (workflow: Workflow) => void;
+  onWorkflowUpdate?: (workflow: Workflow) => void;
 }
 
 const WorkflowList: React.FC<WorkflowListProps> = ({ 
   workflows, 
   onWorkflowSelect, 
   onCreateWorkflow,
-  onWorkflowImport
+  onWorkflowImport,
+  onWorkflowUpdate
 }) => {
   const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null);
   const [exportingWorkflow, setExportingWorkflow] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'active': return 'bg-green-100 text-green-800';
-      case 'paused': return 'bg-yellow-100 text-yellow-800';
-      case 'draft': return 'bg-secondary-100 text-secondary-800';
-      case 'error': return 'bg-red-100 text-red-800';
-      default: return 'bg-secondary-100 text-secondary-800';
+      case 'active': return 'bg-green-100 text-green-800 border-green-200';
+      case 'paused': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'draft': return 'bg-secondary-100 text-secondary-800 border-secondary-200';
+      case 'error': return 'bg-red-100 text-red-800 border-red-200';
+      default: return 'bg-secondary-100 text-secondary-800 border-secondary-200';
     }
   };
 
@@ -64,37 +71,128 @@ const WorkflowList: React.FC<WorkflowListProps> = ({
     }
   };
 
-  const handleImportWorkflow = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleStatusChange = async (workflow: Workflow, newStatus: 'draft' | 'active' | 'paused' | 'error') => {
+    try {
+      setUpdatingStatus(workflow.id);
+      
+      // Update workflow status
+      const updatedWorkflow = {
+        ...workflow,
+        status: newStatus,
+        isActive: newStatus === 'active', // Keep isActive in sync
+        updatedAt: new Date()
+      };
+
+      // Save to database
+      const savedWorkflow = await WorkflowService.saveWorkflow(updatedWorkflow);
+      
+      // Notify parent component to update the list
+      if (onWorkflowUpdate) {
+        onWorkflowUpdate(savedWorkflow);
+      }
+      
+      console.log(`✅ Updated workflow "${workflow.name}" to ${newStatus}`);
+    } catch (error) {
+      console.error('❌ Error updating workflow status:', error);
+      // You could show an error message here
+    } finally {
+      setUpdatingStatus(null);
+    }
+  };
+
+  const handleQuickToggle = async (workflow: Workflow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // Quick toggle between active and paused
+    const newStatus = workflow.status === 'active' ? 'paused' : 'active';
+    await handleStatusChange(workflow, newStatus);
+  };
+
+  const handleImportWorkflow = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
 
     try {
       setImporting(true);
-      const importedWorkflow = await StorageService.importWorkflow(file);
-      
-      // Create a new workflow with imported data
-      const newWorkflow: Workflow = {
-        ...importedWorkflow,
-        id: `workflow-${Date.now()}`,
-        name: `${importedWorkflow.name} (Imported)`,
-        isActive: false,
-        status: 'draft',
-        executions: 0,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-
+      const workflow = await StorageService.importWorkflow(file);
       if (onWorkflowImport) {
-        onWorkflowImport(newWorkflow);
+        onWorkflowImport(workflow);
       }
     } catch (error) {
       console.error('Error importing workflow:', error);
       // You could show an error message here
     } finally {
       setImporting(false);
-      // Reset the input
-      event.target.value = '';
+      // Clear the file input
+      e.target.value = '';
     }
+  };
+
+  const StatusDropdown: React.FC<{ workflow: Workflow }> = ({ workflow }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    
+    const statusOptions = [
+      { value: 'draft', label: 'Draft', icon: Edit, color: 'text-secondary-600' },
+      { value: 'active', label: 'Active', icon: Play, color: 'text-green-600' },
+      { value: 'paused', label: 'Paused', icon: Pause, color: 'text-yellow-600' },
+      { value: 'error', label: 'Error', icon: Activity, color: 'text-red-600' }
+    ];
+    
+    const currentStatus = statusOptions.find(s => s.value === workflow.status);
+    
+    return (
+      <div className="relative">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsOpen(!isOpen);
+          }}
+          disabled={updatingStatus === workflow.id}
+          className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border transition-colors ${
+            getStatusColor(workflow.status)
+          } hover:opacity-80 disabled:opacity-50`}
+        >
+          {updatingStatus === workflow.id ? (
+            <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+          ) : (
+            currentStatus && <currentStatus.icon className="w-3 h-3 mr-1" />
+          )}
+          {updatingStatus === workflow.id ? 'Updating...' : workflow.status}
+        </button>
+        
+        {isOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-10"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="absolute right-0 mt-1 w-32 bg-white border border-secondary-200 rounded-lg shadow-lg z-20">
+              {statusOptions.map((status) => {
+                const Icon = status.icon;
+                return (
+                  <button
+                    key={status.value}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsOpen(false);
+                      if (status.value !== workflow.status) {
+                        handleStatusChange(workflow, status.value as any);
+                      }
+                    }}
+                    className={`w-full text-left px-3 py-2 flex items-center hover:bg-secondary-50 first:rounded-t-lg last:rounded-b-lg ${
+                      status.value === workflow.status ? 'bg-primary-50 text-primary-700' : 'text-secondary-700'
+                    }`}
+                  >
+                    <Icon className={`w-3 h-3 mr-2 ${status.color}`} />
+                    {status.label}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -137,22 +235,21 @@ const WorkflowList: React.FC<WorkflowListProps> = ({
         </div>
 
         {/* Main Content */}
-        <div className="p-8">
+        <div className="px-8 pb-8">
           {workflows.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24">
-              <div className="w-20 h-20 bg-primary-50 rounded-full flex items-center justify-center mb-6">
-                <Activity className="w-10 h-10 text-primary-500" />
+            <div className="text-center py-16">
+              <div className="w-16 h-16 bg-white border border-secondary-300 rounded-lg flex items-center justify-center mx-auto mb-4">
+                <Activity className="w-8 h-8 text-secondary-400" />
               </div>
-              <h2 className="text-2xl font-semibold text-secondary-900 mb-2">No Playbooks Yet</h2>
-              <p className="text-secondary-600 mb-6 text-center max-w-md">
-                Create your first personalization playbook to start automating website experiences for your visitors.
+              <h3 className="text-xl font-semibold text-secondary-900 mb-2">No playbooks yet</h3>
+              <p className="text-secondary-600 mb-6 max-w-sm mx-auto">
+                Create your first personalization playbook to get started with targeting different visitor segments.
               </p>
               <button
                 onClick={onCreateWorkflow}
-                className="flex items-center space-x-2 px-6 py-3 bg-primary-500 text-white hover:bg-primary-600 transition-colors font-medium text-base rounded-lg shadow"
+                className="bg-primary-500 text-white px-6 py-3 rounded-lg hover:bg-primary-600 transition-colors font-medium"
               >
-                <Plus className="w-5 h-5" />
-                <span>Create Playbook</span>
+                Create Your First Playbook
               </button>
             </div>
           ) : (
@@ -174,10 +271,29 @@ const WorkflowList: React.FC<WorkflowListProps> = ({
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(workflow.status)}`}>
-                        {getStatusIcon(workflow.status)}
-                        {workflow.status}
-                      </div>
+                      {/* Status Dropdown */}
+                      <StatusDropdown workflow={workflow} />
+                      
+                      {/* Quick Toggle Button */}
+                      <button
+                        onClick={(e) => handleQuickToggle(workflow, e)}
+                        disabled={updatingStatus === workflow.id}
+                        className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
+                          workflow.status === 'active' 
+                            ? 'bg-green-100 text-green-600 hover:bg-green-200' 
+                            : 'bg-secondary-100 text-secondary-600 hover:bg-secondary-200'
+                        }`}
+                        title={workflow.status === 'active' ? 'Pause workflow' : 'Activate workflow'}
+                      >
+                        {updatingStatus === workflow.id ? (
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                        ) : workflow.status === 'active' ? (
+                          <Pause className="w-4 h-4" />
+                        ) : (
+                          <Play className="w-4 h-4" />
+                        )}
+                      </button>
+                      
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -189,7 +305,10 @@ const WorkflowList: React.FC<WorkflowListProps> = ({
                       >
                         <Download className="w-4 h-4 text-secondary-400" />
                       </button>
-                      <button className="p-2 hover:bg-secondary-100 rounded-lg transition-colors">
+                      <button 
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-2 hover:bg-secondary-100 rounded-lg transition-colors"
+                      >
                         <MoreHorizontal className="w-5 h-5 text-secondary-400" />
                       </button>
                     </div>
