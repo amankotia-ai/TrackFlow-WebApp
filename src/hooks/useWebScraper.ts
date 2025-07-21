@@ -32,7 +32,13 @@ export function useWebScraper(): UseWebScraperReturn {
 
     try {
       // Use server-side scraping to avoid CORS issues
-      const response = await fetch('https://trackflow-webapp-production.up.railway.app/api/scrape', {
+      // Auto-detect environment: use localhost for development, Railway for production
+      const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const apiUrl = isLocalDev 
+        ? 'http://localhost:3001/api/scrape'
+        : 'https://trackflow-webapp-production.up.railway.app/api/scrape';
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
