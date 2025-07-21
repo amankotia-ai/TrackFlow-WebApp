@@ -272,9 +272,11 @@
       this.log(`🔍 Checking ${this.workflows.size} workflows for priority actions`);
       
       this.workflows.forEach(workflow => {
-        this.log(`📋 Checking workflow: ${workflow.name} (active: ${workflow.is_active})`);
+        // Check both is_active and isActive properties for compatibility
+        const isActive = workflow.is_active ?? workflow.isActive ?? true; // Default to true if missing
+        this.log(`📋 Checking workflow: ${workflow.name} (active: ${isActive}, is_active: ${workflow.is_active}, isActive: ${workflow.isActive})`);
         
-        if (!workflow.is_active) {
+        if (!isActive) {
           this.log(`⏭️ Skipping inactive workflow: ${workflow.name}`);
           return;
         }
@@ -393,7 +395,8 @@
       }
 
       for (const [workflowId, workflow] of this.workflows) {
-        if (!workflow.is_active) continue;
+        const isActive = workflow.is_active ?? workflow.isActive ?? true;
+        if (!isActive) continue;
 
         // Find trigger nodes
         const triggerNodes = workflow.nodes?.filter(node => node.type === 'trigger') || [];
