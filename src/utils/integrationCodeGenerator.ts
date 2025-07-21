@@ -124,37 +124,210 @@ function generateUnifiedBodyCode(config: TrackingConfig, workflow: Workflow): st
     return `<!-- No additional code needed - unified system auto-initializes! -->`;
   }
 
-  return `<!-- Optional: Custom configuration and debug mode -->
+  return `<!-- Detailed Debug Mode - Add before </body> -->
 <script>
-  // Wait for system to load, then configure
-  setTimeout(() => {
-    if (window.workflowSystem) {
-      // Enable debug mode to see workflow execution logs
-      window.workflowSystem.config.debug = true;
+  // Comprehensive workflow debugging system
+  function initializeDetailedDebugging() {
+    console.log('🚀 TrackFlow Debug Mode: Initializing detailed logging...');
+    
+    if (!window.workflowSystem) {
+      console.error('❌ Unified workflow system not found!');
+      return;
+    }
+
+    // Enable debug mode
+    window.workflowSystem.config.debug = true;
+    
+    // Enhanced logging function
+    function debugLog(message, data = null, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const emoji = { info: '📋', success: '✅', warning: '⚠️', error: '❌' }[type] || '📋';
+      console.log(\`[\${timestamp}] \${emoji} \${message}\`);
+      if (data) console.log('  Data:', data);
+    }
+
+    // 1. SYSTEM STATUS
+    debugLog('🎯 Workflow Integration Status', {
+      workflowName: '${workflow.name}',
+      workflowId: '${workflow.id}',
+      systemLoaded: !!window.workflowSystem,
+      debugMode: window.workflowSystem.config.debug,
+      apiKey: window.workflowSystem.config.apiKey ? 'Set' : 'Not set'
+    }, 'success');
+
+    // 2. PAGE CONTEXT
+    debugLog('📄 Page Context Analysis', {
+      url: window.location.href,
+      path: window.location.pathname,
+      search: window.location.search,
+      deviceType: window.workflowSystem.pageContext.deviceType,
+      utmParameters: window.workflowSystem.pageContext.utm,
+      referrer: document.referrer,
+      userAgent: navigator.userAgent.substring(0, 100) + '...'
+    });
+
+    // 3. WORKFLOW STATUS
+    debugLog('📊 Loaded Workflows Analysis', {
+      totalWorkflows: window.workflowSystem.workflows.size,
+      workflowsList: Array.from(window.workflowSystem.workflows.values()).map(w => ({
+        id: w.id,
+        name: w.name,
+        isActive: w.is_active,
+        targetUrl: w.target_url,
+        nodeCount: w.nodes?.length || 0,
+        connectionCount: w.connections?.length || 0
+      }))
+    });
+
+    // 4. TARGET ELEMENT ANALYSIS
+    const targetWorkflow = Array.from(window.workflowSystem.workflows.values())
+      .find(w => w.id === '${workflow.id}');
+    
+    if (targetWorkflow) {
+      debugLog('🎯 Target Workflow Analysis', targetWorkflow);
       
-      console.log('🎯 Workflow Integration: "${workflow.name}" loaded');
-      console.log('📊 Workflows active:', window.workflowSystem.workflows.size);
-      console.log('📱 Device type:', window.workflowSystem.pageContext.deviceType);
-      console.log('🔗 Current URL:', window.location.href);
+      // Check action nodes and their selectors
+      const actionNodes = targetWorkflow.nodes?.filter(n => n.type === 'action') || [];
+      actionNodes.forEach(action => {
+        const selector = action.config?.selector;
+        if (selector) {
+          const elements = document.querySelectorAll(selector);
+          debugLog(\`🔍 Element Check: \${action.name}\`, {
+            selector: selector,
+            elementsFound: elements.length,
+            elementDetails: Array.from(elements).slice(0, 3).map(el => ({
+              tag: el.tagName.toLowerCase(),
+              id: el.id || 'none',
+              class: el.className || 'none',
+              text: el.textContent?.substring(0, 50) + '...' || 'no text'
+            }))
+          }, elements.length > 0 ? 'success' : 'warning');
+        }
+      });
+    }
+
+    // 5. TRIGGER EVALUATION TEST
+    const triggerNodes = targetWorkflow?.nodes?.filter(n => n.type === 'trigger') || [];
+    triggerNodes.forEach(trigger => {
+      debugLog(\`🔗 Trigger Test: \${trigger.name}\`, {
+        triggerConfig: trigger.config,
+        triggerType: trigger.name
+      });
       
-      // Optional: Manual trigger testing
-      window.testWorkflow = function() {
+      // Test trigger evaluation
+      try {
+        const testEvent = {
+          eventType: 'debug_test',
+          deviceType: window.workflowSystem.pageContext.deviceType,
+          utm: window.workflowSystem.pageContext.utm,
+          visitCount: 1,
+          timeOnPage: 0,
+          scrollPercentage: 0
+        };
+        
+        const wouldTrigger = window.workflowSystem.evaluateTrigger(trigger, testEvent);
+        debugLog(\`📊 Trigger Evaluation: \${trigger.name}\`, {
+          result: wouldTrigger,
+          testEvent: testEvent
+        }, wouldTrigger ? 'success' : 'warning');
+      } catch (error) {
+        debugLog(\`❌ Trigger Evaluation Error: \${trigger.name}\`, error, 'error');
+      }
+    });
+
+    // 6. MANUAL TEST FUNCTIONS
+    window.debugWorkflow = {
+      // Test specific trigger
+      testTrigger: function() {
+        debugLog('🧪 Manual Trigger Test', null, 'info');
         window.workflowSystem.handleEvent({
           eventType: 'manual_test',
+          deviceType: window.workflowSystem.pageContext.deviceType,
+          utm: window.workflowSystem.pageContext.utm,
           timestamp: Date.now()
         });
-        console.log('🧪 Manual workflow test triggered');
-      };
+      },
       
-      // Show workflows in console
-      console.log('📋 Active workflows for this page:');
-      window.workflowSystem.workflows.forEach(workflow => {
-        console.log(\`  • \${workflow.name} (target: \${workflow.target_url})\`);
-      });
-    } else {
-      console.error('❌ Unified workflow system not loaded');
+      // Force execute all actions
+      forceExecute: function() {
+        debugLog('⚡ Force Executing All Actions', null, 'info');
+        const targetWorkflow = Array.from(window.workflowSystem.workflows.values())
+          .find(w => w.id === '${workflow.id}');
+        if (targetWorkflow) {
+          const actions = targetWorkflow.nodes?.filter(n => n.type === 'action') || [];
+          actions.forEach(action => {
+            window.workflowSystem.executeAction(action);
+          });
+        }
+      },
+      
+      // Test specific selector
+      testSelector: function(selector) {
+        const elements = document.querySelectorAll(selector);
+        debugLog(\`🎯 Selector Test: \${selector}\`, {
+          found: elements.length,
+          elements: Array.from(elements).map(el => ({
+            tag: el.tagName,
+            id: el.id,
+            class: el.className,
+            text: el.textContent?.substring(0, 50)
+          }))
+        });
+        return elements;
+      },
+      
+      // Show workflow status
+      status: function() {
+        debugLog('📊 Current Workflow Status', {
+          workflowsLoaded: window.workflowSystem.workflows.size,
+          executedActions: window.workflowSystem.executedActions.size,
+          pageContext: window.workflowSystem.pageContext,
+          config: window.workflowSystem.config
+        });
+      }
+    };
+
+    // 7. CONSOLE HELP
+    console.log('\\n🛠️  DEBUG COMMANDS AVAILABLE:');
+    console.log('  debugWorkflow.testTrigger()     - Test workflow trigger manually');
+    console.log('  debugWorkflow.forceExecute()    - Force execute all actions');
+    console.log('  debugWorkflow.testSelector("h1") - Test if selector finds elements');
+    console.log('  debugWorkflow.status()          - Show current system status');
+    console.log('\\n💡 TROUBLESHOOTING:');
+    console.log('  1. Check if target elements exist in the page');
+    console.log('  2. Verify UTM parameters match trigger configuration');
+    console.log('  3. Ensure workflow is active and properly connected');
+    console.log('  4. Test selectors with debugWorkflow.testSelector()');
+    
+    debugLog('🎉 Detailed debugging initialized! Use debugWorkflow.* commands', null, 'success');
+  }
+
+  // Initialize debugging when system is ready
+  setTimeout(() => {
+    try {
+      initializeDetailedDebugging();
+    } catch (error) {
+      console.error('❌ Debug initialization failed:', error);
     }
   }, 2000);
+
+  // Also try to initialize immediately if system is already loaded
+  if (window.workflowSystem) {
+    initializeDetailedDebugging();
+  }
+
+  // Monitor for system load
+  let checkCount = 0;
+  const systemCheck = setInterval(() => {
+    checkCount++;
+    if (window.workflowSystem) {
+      clearInterval(systemCheck);
+      initializeDetailedDebugging();
+    } else if (checkCount > 10) {
+      clearInterval(systemCheck);
+      console.error('❌ Workflow system failed to load after 10 seconds');
+    }
+  }, 1000);
 </script>`;
 }
 
