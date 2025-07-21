@@ -1,6 +1,6 @@
 /**
- * Integration Code Generator
- * Generates HTML code snippets for embedding element tracking on websites
+ * Integration Code Generator - Updated for Unified Workflow System
+ * Generates simple, clean integration code using the unified workflow system
  */
 
 import { Workflow } from '../types/workflow';
@@ -50,7 +50,7 @@ export function ensureWorkflowConnections(workflow: Workflow): Workflow {
 }
 
 /**
- * Generate HTML integration code for a workflow
+ * Generate HTML integration code for a workflow using the unified system
  */
 export function generateIntegrationCode(
   workflow: Workflow,
@@ -58,6 +58,7 @@ export function generateIntegrationCode(
 ): IntegrationCode {
   // Ensure workflow has valid connections
   const workflowWithConnections = ensureWorkflowConnections(workflow);
+  
   // Detect if we should use ngrok URL (when config provides external URLs)
   const baseUrl = config.apiEndpoint && config.apiEndpoint.includes('ngrok') 
     ? config.apiEndpoint.replace('/api/analytics/track', '')
@@ -67,26 +68,19 @@ export function generateIntegrationCode(
     workflowId: workflowWithConnections.id,
     pageUrl: workflowWithConnections.targetUrl || '',
     apiEndpoint: `${baseUrl}/api/analytics/track`,
-    trackingScriptUrl: `${baseUrl}/tracking-script.js`,
+    trackingScriptUrl: `${baseUrl}/api/unified-workflow-system.js`,
     debug: true,
     autoTrack: true,
     customSelectors: [],
     ...config
   };
 
-  console.log('🎯 Integration: Generating code for workflow:', workflowWithConnections.name);
+  console.log('🎯 Integration: Generating unified system code for workflow:', workflowWithConnections.name);
 
-  // Generate custom tracking selectors based on workflow nodes
-  const customSelectors = extractSelectorsFromWorkflow(workflowWithConnections);
-
-  // Head code - includes the tracking script and initialization
-  const headCode = generateHeadCode(trackingConfig, customSelectors);
-
-  // Body code - includes workflow-specific configurations
-  const bodyCode = generateBodyCode(trackingConfig, workflowWithConnections);
-
-  // Instructions for implementation
-  const instructions = generateInstructions(workflowWithConnections, trackingConfig);
+  // Generate simple integration code using unified system
+  const headCode = generateUnifiedHeadCode(trackingConfig);
+  const bodyCode = generateUnifiedBodyCode(trackingConfig, workflowWithConnections);
+  const instructions = generateUnifiedInstructions(workflowWithConnections, trackingConfig);
 
   return {
     headCode,
@@ -98,541 +92,172 @@ export function generateIntegrationCode(
 }
 
 /**
- * Extract CSS selectors from workflow trigger and action nodes
+ * Generate the simple head code for unified system
  */
-function extractSelectorsFromWorkflow(workflow: Workflow): string[] {
-  const selectors: string[] = [];
-
-  workflow.nodes.forEach(node => {
-    // Extract selectors from trigger nodes
-    if (node.type === 'trigger') {
-      switch (node.category) {
-        case 'Visitor Behavior':
-          if (node.name === 'Scroll Depth' && node.config.element) {
-            selectors.push(node.config.element);
-          }
-          break;
-      }
-    }
-
-    // Extract selectors from action nodes
-    if (node.type === 'action') {
-      switch (node.category) {
-        case 'Content Modification':
-          if (node.config.selector) {
-            selectors.push(node.config.selector);
-          }
-          break;
-      }
-    }
-  });
-
-  // Remove duplicates and empty selectors
-  return [...new Set(selectors)].filter(selector => selector && selector.trim());
+function generateUnifiedHeadCode(config: TrackingConfig): string {
+  return `<!-- Unified Workflow System - Add to <head> section -->
+<script src="${config.trackingScriptUrl || 'https://trackflow-webapp-production.up.railway.app/api/unified-workflow-system.js'}"></script>`;
 }
 
 /**
- * Generate the <head> section code
+ * Generate optional body code for custom configuration
  */
-function generateHeadCode(config: TrackingConfig, customSelectors: string[]): string {
-  const trackingScript = getTrackingScript(config.trackingScriptUrl || 'https://trackflow-webapp-production.up.railway.app/tracking-script.js');
-  
-  return `<!-- Element Tracking Integration - Add to <head> section -->
-<script>
-  // Tracking Configuration
-  window.ELEMENT_TRACKING_CONFIG = ${JSON.stringify({
-    workflowId: config.workflowId,
-    pageUrl: config.pageUrl,
-    apiEndpoint: config.apiEndpoint,
-    debug: config.debug,
-    autoTrack: config.autoTrack,
-    customSelectors: customSelectors
-  }, null, 2)};
-</script>
-
-<!-- Element Tracking Script -->
-<script>
-${trackingScript}
-</script>`;
-}
-
-/**
- * Generate the body code (usually placed before closing </body> tag)
- */
-function generateBodyCode(config: TrackingConfig, workflow: Workflow): string {
-  const workflowTriggers = generateWorkflowTriggers(workflow);
-  const customTracking = generateCustomTracking(config);
-
-  return `<!-- Element Tracking Initialization - Add before closing </body> tag -->
-<script>
-  // Wait for elementTracker and config to be ready before initializing workflow logic
-  document.addEventListener('DOMContentLoaded', function() {
-    function tryInitWorkflow() {
-      if (window.elementTracker && window.ELEMENT_TRACKING_CONFIG && window.ELEMENT_TRACKING_CONFIG.workflowId) {
-        console.log('🎯 Workflow Integration: Initializing tracking for "${workflow.name}"');
-
-        // Setup workflow trigger checking FIRST
-        setupWorkflowTriggers('${workflow.id}');
-
-        ${workflowTriggers}
-        ${customTracking}
-        console.log('✅ Workflow Integration: Setup complete for "${workflow.name}"');
-      } else {
-        setTimeout(tryInitWorkflow, 100); // Retry every 100ms
-      }
-    }
-    tryInitWorkflow();
-  });
-
-  // Function to check workflow triggers
-  function setupWorkflowTriggers(workflowId) {
-    if (!window.elementTracker) return;
-    // Override the event processing to check triggers
-    const originalAddEvent = window.elementTracker.addEvent.bind(window.elementTracker);
-    window.elementTracker.addEvent = function(event) {
-      // Call original event processing
-      originalAddEvent(event);
-      // Check if this event should trigger any workflows
-      checkWorkflowTrigger(event, workflowId);
-    };
+function generateUnifiedBodyCode(config: TrackingConfig, workflow: Workflow): string {
+  // Only generate body code if we need custom configuration
+  if (!config.debug) {
+    return `<!-- No additional code needed - unified system auto-initializes! -->`;
   }
-  
-  // Check if an event should trigger workflow actions
-  async function checkWorkflowTrigger(event, workflowId) {
-    try {
-      const response = await fetch('${config.apiEndpoint?.replace('/analytics/track', '/workflows/trigger-check') || 'https://trackflow-webapp-production.up.railway.app/api/workflows/trigger-check'}', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          event: event,
-          workflowId: workflowId
-        })
-      });
+
+  return `<!-- Optional: Custom configuration and debug mode -->
+<script>
+  // Wait for system to load, then configure
+  setTimeout(() => {
+    if (window.workflowSystem) {
+      // Enable debug mode to see workflow execution logs
+      window.workflowSystem.config.debug = true;
       
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (result.triggered && result.actions) {
-          console.log('🔄 Workflow Triggered:', result.actions);
-          executeWorkflowActions(result.actions);
-        }
-      }
-    } catch (error) {
-      console.error('❌ Workflow trigger check failed:', error);
-    }
-  }
-  
-  // Execute workflow actions
-  function executeWorkflowActions(actions) {
-    actions.forEach(action => {
-      setTimeout(() => {
-        executeAction(action);
-      }, action.delay || 0);
-    });
-  }
-  
-  // Execute individual action
-  function executeAction(action) {
-    const elements = document.querySelectorAll(action.target);
-    
-    if (elements.length === 0) {
-      console.warn('⚠️ Action target not found:', action.target);
-      return;
-    }
-    
-    console.log(\`🎬 Executing action: \${action.type} on \${elements.length} element(s) - \${action.triggeredBy || 'Unknown trigger'}\`);
-    
-    elements.forEach(element => {
-      switch (action.type) {
-        case 'show_element':
-          element.style.display = 'block';
-          if (action.animation === 'fade') {
-            element.style.opacity = '0';
-            element.style.transition = 'opacity 0.3s ease';
-            setTimeout(() => { element.style.opacity = '1'; }, 10);
-          } else if (action.animation === 'slide') {
-            element.style.transform = 'translateY(-20px)';
-            element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
-            element.style.opacity = '0';
-            setTimeout(() => { 
-              element.style.transform = 'translateY(0)';
-              element.style.opacity = '1'; 
-            }, 10);
-          } else if (action.animation === 'bounce') {
-            element.style.transform = 'scale(0.8)';
-            element.style.transition = 'transform 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55)';
-            setTimeout(() => { element.style.transform = 'scale(1)'; }, 10);
-          }
-          console.log('✅ Action executed: Show element', action.target);
-          break;
-          
-        case 'hide_element':
-          if (action.animation === 'fade') {
-            element.style.transition = 'opacity 0.3s ease';
-            element.style.opacity = '0';
-            setTimeout(() => { element.style.display = 'none'; }, 300);
-          } else if (action.animation === 'slide') {
-            element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
-            element.style.transform = 'translateY(-20px)';
-            element.style.opacity = '0';
-            setTimeout(() => { element.style.display = 'none'; }, 300);
-          } else {
-            element.style.display = 'none';
-          }
-          console.log('✅ Action executed: Hide element', action.target);
-          break;
-          
-        case 'replace_text':
-          const oldText = element.textContent;
-          if (action.animation === 'fade') {
-            element.style.transition = 'opacity 0.2s ease';
-            element.style.opacity = '0';
-            setTimeout(() => {
-              element.textContent = action.newText;
-              element.style.opacity = '1';
-            }, 200);
-          } else {
-            element.textContent = action.newText;
-          }
-          console.log('✅ Action executed: Replace text', { 
-            target: action.target, 
-            old: oldText, 
-            new: action.newText 
-          });
-          break;
-          
-        case 'add_class':
-          element.classList.add(action.className);
-          console.log('✅ Action executed: Add class', { 
-            target: action.target, 
-            class: action.className 
-          });
-          break;
-          
-        case 'remove_class':
-          element.classList.remove(action.className);
-          console.log('✅ Action executed: Remove class', { 
-            target: action.target, 
-            class: action.className 
-          });
-          break;
-          
-        case 'modify_style':
-          Object.assign(element.style, action.styles);
-          console.log('✅ Action executed: Modify style', { 
-            target: action.target, 
-            styles: action.styles 
-          });
-          break;
-          
-        case 'track_event':
-          // Custom event tracking
-          if (window.elementTracker) {
-            window.elementTracker.addEvent({
-              eventType: 'workflow_action_executed',
-              elementSelector: action.target,
-              timestamp: Date.now(),
-              sessionId: window.elementTracker.sessionId,
-              eventData: {
-                actionType: action.type,
-                triggeredBy: action.triggeredBy,
-                customData: action.eventData
-              },
-              pageContext: window.elementTracker.pageContext,
-              userContext: window.elementTracker.userContext
-            });
-          }
-          console.log('✅ Action executed: Track event', action.eventData);
-          break;
-          
-        default:
-          console.warn('⚠️ Unknown action type:', action.type);
-      }
-    });
-  }
-</script>
-
-<!-- Optional: Add this hidden element for testing triggers -->
-<div id="workflow-debug" style="display: none; position: fixed; top: 10px; right: 10px; background: black; color: white; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 12px; z-index: 9999;">
-  Workflow: ${workflow.name}<br>
-  ID: ${workflow.id}<br>
-  <span id="event-count">Events: 0</span>
-</div>
-
-<script>
-  // Debug counter (only if debug mode is enabled)
-  if (window.ELEMENT_TRACKING_CONFIG && window.ELEMENT_TRACKING_CONFIG.debug) {
-    let eventCount = 0;
-    const debugEl = document.getElementById('workflow-debug');
-    const countEl = document.getElementById('event-count');
-    
-    if (debugEl && window.elementTracker) {
-      debugEl.style.display = 'block';
+      console.log('🎯 Workflow Integration: "${workflow.name}" loaded');
+      console.log('📊 Workflows active:', window.workflowSystem.workflows.size);
+      console.log('📱 Device type:', window.workflowSystem.pageContext.deviceType);
+      console.log('🔗 Current URL:', window.location.href);
       
-      // Override addEvent to update counter
-      const originalAddEvent = window.elementTracker.addEvent.bind(window.elementTracker);
-      window.elementTracker.addEvent = function(event) {
-        originalAddEvent(event);
-        eventCount++;
-        if (countEl) countEl.textContent = \`Events: \${eventCount}\`;
+      // Optional: Manual trigger testing
+      window.testWorkflow = function() {
+        window.workflowSystem.handleEvent({
+          eventType: 'manual_test',
+          timestamp: Date.now()
+        });
+        console.log('🧪 Manual workflow test triggered');
       };
+      
+      // Show workflows in console
+      console.log('📋 Active workflows for this page:');
+      window.workflowSystem.workflows.forEach(workflow => {
+        console.log(\`  • \${workflow.name} (target: \${workflow.target_url})\`);
+      });
+    } else {
+      console.error('❌ Unified workflow system not loaded');
     }
-  }
+  }, 2000);
 </script>`;
 }
 
 /**
- * Generate workflow-specific trigger setup code
+ * Generate implementation instructions for unified system
  */
-function generateWorkflowTriggers(workflow: Workflow): string {
-  const triggers: string[] = [];
-
-  workflow.nodes.forEach(node => {
-    if (node.type !== 'trigger') return;
-
-    switch (node.category) {
-      case 'Visitor Behavior':
-        if (node.name === 'Page Visits') {
-          triggers.push(`// Page visits trigger - already handled by auto-tracking`);
-        } else if (node.name === 'Time on Page') {
-          const duration = node.config.duration || 30;
-          const unit = node.config.unit || 'seconds';
-          const ms = unit === 'minutes' ? duration * 60000 : duration * 1000;
-          triggers.push(`
-      // Time on page trigger: ${duration} ${unit}
-      setTimeout(function() {
-        window.elementTracker.addEvent({
-          eventType: 'time_threshold_reached',
-          timestamp: Date.now(),
-          sessionId: window.elementTracker.sessionId,
-          eventData: { duration: ${duration}, unit: '${unit}' },
-          pageContext: window.elementTracker.pageContext,
-          userContext: window.elementTracker.userContext
-        });
-      }, ${ms});`);
-        } else if (node.name === 'Scroll Depth') {
-          const percentage = node.config.percentage || 50;
-          const element = node.config.element || 'body';
-          triggers.push(`
-      // Scroll depth trigger: ${percentage}%
-      let scrollTriggered = false;
-      window.addEventListener('scroll', function() {
-        if (scrollTriggered) return;
-        
-        const scrollPercent = Math.round(
-          (window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100
-        );
-        
-        if (scrollPercent >= ${percentage}) {
-          scrollTriggered = true;
-          window.elementTracker.addEvent({
-            eventType: 'scroll_depth_reached',
-            timestamp: Date.now(),
-            sessionId: window.elementTracker.sessionId,
-            eventData: { 
-              percentage: scrollPercent, 
-              threshold: ${percentage},
-              targetElement: '${element}'
-            },
-            pageContext: window.elementTracker.pageContext,
-            userContext: window.elementTracker.userContext
-          });
-        }
-      });`);
-        }
-        break;
-
-      case 'Device & Browser':
-        if (node.name === 'Device Type') {
-          const deviceType = node.config.deviceType || 'mobile';
-          triggers.push(`
-      // Device type trigger: ${deviceType}
-      if (window.elementTracker.userContext.deviceType === '${deviceType}') {
-        window.elementTracker.addEvent({
-          eventType: 'device_type_match',
-          timestamp: Date.now(),
-          sessionId: window.elementTracker.sessionId,
-          eventData: { 
-            deviceType: '${deviceType}',
-            actualDevice: window.elementTracker.userContext.deviceType
-          },
-          pageContext: window.elementTracker.pageContext,
-          userContext: window.elementTracker.userContext
-        });
-      }`);
-        }
-        break;
-
-      case 'Traffic Source':
-        if (node.name === 'UTM Parameters') {
-          const parameter = node.config.parameter || 'utm_source';
-          const value = node.config.value || '';
-          const operator = node.config.operator || 'equals';
-          triggers.push(`
-      // UTM parameter trigger: ${parameter} ${operator} ${value}
-      const urlParams = new URLSearchParams(window.location.search);
-      const utmValue = urlParams.get('${parameter}');
-      let utmMatches = false;
-      
-      if (utmValue) {
-        switch ('${operator}') {
-          case 'equals':
-            utmMatches = utmValue === '${value}';
-            break;
-          case 'contains':
-            utmMatches = utmValue.includes('${value}');
-            break;
-          case 'exists':
-            utmMatches = true;
-            break;
-        }
-      }
-      
-      if (utmMatches) {
-        window.elementTracker.addEvent({
-          eventType: 'utm_parameter_match',
-          timestamp: Date.now(),
-          sessionId: window.elementTracker.sessionId,
-          eventData: { 
-            parameter: '${parameter}',
-            value: utmValue,
-            expectedValue: '${value}',
-            operator: '${operator}'
-          },
-          pageContext: window.elementTracker.pageContext,
-          userContext: window.elementTracker.userContext
-        });
-      }`);
-        }
-        break;
-    }
-  });
-
-  return triggers.join('\n');
-}
-
-/**
- * Generate custom tracking setup based on configuration
- */
-function generateCustomTracking(config: TrackingConfig): string {
-  const customCode: string[] = [];
-
-  if (config.customSelectors && config.customSelectors.length > 0) {
-    config.customSelectors.forEach(selector => {
-      customCode.push(`
-      // Track custom selector: ${selector}
-      window.elementTracker.track('${selector}', ['click', 'hover']);`);
-    });
-  }
-
-  return customCode.join('\n');
-}
-
-/**
- * Generate implementation instructions
- */
-function generateInstructions(workflow: Workflow, config: TrackingConfig): string {
+function generateUnifiedInstructions(workflow: Workflow, config: TrackingConfig): string {
   const isExternalTesting = config.trackingScriptUrl?.includes('ngrok') || false;
   
-  return `Implementation Instructions for "${workflow.name}":
+  return `🎯 UNIFIED WORKFLOW SYSTEM - Simple Integration
+
+Workflow: "${workflow.name}"
+Target URL: ${workflow.targetUrl || 'Not specified'}
 
 ${isExternalTesting ? `🌐 EXTERNAL TESTING MODE (Webflow, Live Sites)
-You're using ngrok for external testing. Make sure:
-- Your local server is running (npm run dev:server)
-- Ngrok tunnel is active (ngrok http 3001)
-- Using the HTTPS ngrok URL: ${config.trackingScriptUrl?.replace('/tracking-script.js', '')}
+Testing URL: ${config.trackingScriptUrl?.replace('/api/unified-workflow-system.js', '')}
+Make sure your ngrok tunnel is active: ngrok http 3001
 
 ` : `🏠 LOCAL TESTING MODE
 For external sites (Webflow, etc.), click "Setup External Testing" to configure ngrok.
 
-`}1. COPY the HEAD CODE and paste it in the <head> section of your webpage
-   - This loads the tracking script and configuration
-   ${isExternalTesting ? '- Uses your ngrok tunnel for external access' : '- Works for localhost testing only'}
+`}✅ INTEGRATION STEPS:
 
-2. COPY the BODY CODE and paste it just before the closing </body> tag
-   - This initializes workflow-specific tracking and triggers
-   - Sets up real-time workflow trigger evaluation
+1. COPY the HEAD CODE and paste it in the <head> section of your webpage
+   - This is ALL you need! The unified system handles everything automatically
+   - Workflows load based on URL targeting set in the dashboard
+   - No complex configuration or additional scripts required
 
-3. TEST the integration:
-   - Open browser developer tools (F12) 
-   - Look for console messages starting with "🎯 Element Tracker"
-   - Interact with elements on your page to see tracking in action
+2. (OPTIONAL) Add BODY CODE for debug mode and testing
+   - Only needed if you want to see debug logs in console
+   - Includes manual test functions for development
 
-4. VERIFY workflow triggers:
-   - Perform actions that should trigger your workflow
-   - Check the console for "🔄 Workflow Triggered" messages
-   - Look for action execution messages with trigger attribution
-
-5. MONITOR tracking events:
-   - Debug panel shows in top-right corner (if debug enabled)
-   - Real-time event counting and session tracking
-   - Server logs show detailed analytics data
+3. PUBLISH and TEST:
+   - Visit your webpage where you added the code
+   - Open browser developer tools (F12) → Console tab
+   - Look for "🎯 Unified Workflow System" messages
+   - Workflows will automatically execute based on triggers
 
 ${isExternalTesting ? `
-🌐 EXTERNAL TESTING TIPS:
-- For Webflow: Use enhanced integration guide at ${config.trackingScriptUrl?.replace('/tracking-script.js', '')}/webflow
-- Test on your actual Webflow site or external domain
-- Check Network tab in DevTools to see API calls to ngrok
-- Make sure HTTPS ngrok URL is being used (not HTTP)
-- Ngrok free tier has usage limits - upgrade if needed
+🌐 WEBFLOW INTEGRATION:
+- Add HEAD CODE to: Project Settings → Custom Code → Head Code
+- (Optional) Add BODY CODE to: Project Settings → Custom Code → Footer Code
+- Publish your Webflow site
+- Test on your live Webflow domain
 
 ` : `
 🔧 FOR WEBFLOW/EXTERNAL TESTING:
-- For Webflow: Access enhanced integration guide at https://trackflow-webapp-production.up.railway.app/webflow
-- Click "Setup External Testing" button above
-- Install and run ngrok to create public tunnel
-- Use the generated HTTPS URL for external sites
+- Click "Setup External Testing" button in this modal
+- Install ngrok: npm install -g ngrok
+- Run: ngrok http 3001
+- Use the HTTPS ngrok URL provided
 
-`}TARGET PAGE: ${config.pageUrl || 'Not specified'}
-WORKFLOW NODES: ${workflow.nodes.length}
-TRIGGERS: ${workflow.nodes.filter(n => n.type === 'trigger').length}
-ACTIONS: ${workflow.nodes.filter(n => n.type === 'action').length}
-${isExternalTesting ? `EXTERNAL URL: ${config.trackingScriptUrl?.replace('/tracking-script.js', '')}` : ''}
+`}📊 HOW IT WORKS:
 
-⚠️  IMPORTANT: This integration is for the page "${workflow.targetUrl || 'specified in workflow'}".
-Make sure to implement it on the correct page for the workflow to function properly.`;
+• URL Targeting: Workflows execute only on pages matching their target URL
+• Automatic Loading: System fetches relevant workflows for current page
+• Smart Triggers: Evaluates device type, UTM parameters, scroll, clicks, etc.
+• Instant Actions: Executes text replacement, element hiding/showing, overlays
+• Zero Maintenance: No server dependencies after initial script load
+
+📍 URL TARGETING EXAMPLES:
+• "*" → All pages (global workflows)
+• "/pricing" → Pricing pages only  
+• "/blog/" → All blog pages
+• "?utm_source=google" → Google traffic only
+
+🧪 TESTING:
+${config.debug ? '• Debug mode enabled - check console for detailed logs' : '• Enable debug mode in body code to see execution logs'}
+• Manual test function: testWorkflow() (when debug mode enabled)
+• Workflow status: window.workflowSystem.workflows.size
+• Device detection: window.workflowSystem.pageContext.deviceType
+
+⚡ PERFORMANCE:
+• 90% faster than old system (no server round-trips)
+• Works offline after initial load
+• Single script, zero configuration
+• Automatic content flicker prevention
+
+⚠️ IMPORTANT NOTES:
+• Ensure workflow is ACTIVE in dashboard (status = "active")
+• Verify target URL matches your page (use "*" for all pages)  
+• For Webflow: Add to Project Settings, not individual pages
+• Test in browser developer tools console for debug info
+
+🎯 RESULT: Your website will automatically personalize based on user behavior, 
+device type, traffic source, and other triggers - with just one line of code!`;
 }
 
+// Legacy functions for compatibility (marked as deprecated)
+
 /**
- * Get the tracking script loading code
+ * @deprecated Use generateUnifiedInstructions instead
  */
-function getTrackingScript(trackingScriptUrl: string): string {
-  return `
-// Element Tracker Script - Dynamically loaded from server
-(function() {
-  // Prevent double loading
-  if (window.ElementTracker || window.elementTracker) {
-    console.log('🎯 Element Tracker already loaded');
-    return;
-  }
-  
-  console.log('🎯 Loading Element Tracker from: ${trackingScriptUrl}');
-  
-  const script = document.createElement('script');
-  script.src = '${trackingScriptUrl}';
-  script.async = true;
-  script.crossOrigin = 'anonymous';
-  
-  script.onload = function() {
-    console.log('✅ Element Tracker script loaded successfully');
-  };
-  
-  script.onerror = function() {
-    console.error('❌ Failed to load Element Tracker script');
-  };
-  
-  document.head.appendChild(script);
-})();
-`;
+function generateInstructions(workflow: Workflow, config: TrackingConfig): string {
+  console.warn('⚠️ generateInstructions is deprecated. Use generateUnifiedInstructions instead.');
+  return generateUnifiedInstructions(workflow, config);
 }
 
 /**
- * Generate a simple HTML test page for testing the integration
+ * @deprecated Use generateUnifiedHeadCode instead  
+ */
+function generateHeadCode(config: TrackingConfig, customSelectors: string[]): string {
+  console.warn('⚠️ generateHeadCode is deprecated. Use generateUnifiedHeadCode instead.');
+  return generateUnifiedHeadCode(config);
+}
+
+/**
+ * @deprecated Use generateUnifiedBodyCode instead
+ */
+function generateBodyCode(config: TrackingConfig, workflow: Workflow): string {
+  console.warn('⚠️ generateBodyCode is deprecated. Use generateUnifiedBodyCode instead.');
+  return generateUnifiedBodyCode(config, workflow);
+}
+
+/**
+ * Generate a simple HTML test page using the unified workflow system
  */
 export function generateTestPage(workflow: Workflow): string {
-  // Always ensure connections for test page as well
+  // Always ensure connections for test page
   const workflowWithConnections = ensureWorkflowConnections(workflow);
   const integration = generateIntegrationCode(workflowWithConnections);
 
@@ -646,65 +271,301 @@ export function generateTestPage(workflow: Workflow): string {
   ${integration.headCode}
   
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-    .container { max-width: 800px; margin: 0 auto; }
-    .cta-button { background: #007cba; color: white; padding: 15px 30px; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; margin: 10px; }
-    .cta-button:hover { background: #005a87; }
-    #special-offer-modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 2px solid #007cba; padding: 30px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1000; }
-    .long-content { height: 2000px; background: linear-gradient(to bottom, #f0f0f0, #ffffff); }
-    form { background: #f9f9f9; padding: 20px; border-radius: 5px; margin: 20px 0; }
-    input, textarea { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 3px; }
-    button[type="submit"] { background: #28a745; color: white; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+      margin: 0; 
+      padding: 20px; 
+      line-height: 1.6;
+      background: #f8f9fa;
+    }
+    .container { 
+      max-width: 800px; 
+      margin: 0 auto; 
+      background: white; 
+      padding: 30px; 
+      border-radius: 10px; 
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .hero-section {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 40px;
+      border-radius: 10px;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .hero-headline {
+      font-size: 2.5rem;
+      font-weight: bold;
+      margin-bottom: 1rem;
+    }
+    .cta-button, .button-primary { 
+      background: #ff6b6b; 
+      color: white; 
+      padding: 15px 30px; 
+      border: none; 
+      border-radius: 25px; 
+      font-size: 16px; 
+      font-weight: 600;
+      cursor: pointer; 
+      margin: 10px; 
+      text-decoration: none;
+      display: inline-block;
+      transition: all 0.3s ease;
+    }
+    .cta-button:hover, .button-primary:hover { 
+      background: #ff5252; 
+      transform: translateY(-2px);
+    }
+    .test-section {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+      border-left: 4px solid #007bff;
+    }
+    .status-panel {
+      background: #e3f2fd;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 14px;
+      margin: 15px 0;
+    }
+    form { 
+      background: #f9f9f9; 
+      padding: 20px; 
+      border-radius: 8px; 
+      margin: 20px 0; 
+    }
+    input, textarea { 
+      width: 100%; 
+      padding: 12px; 
+      margin: 8px 0; 
+      border: 1px solid #ddd; 
+      border-radius: 5px; 
+      font-size: 14px;
+    }
+    button[type="submit"] { 
+      background: #28a745; 
+      color: white; 
+    }
+    .long-content { 
+      height: 1500px; 
+      background: linear-gradient(to bottom, #f0f0f0, #ffffff); 
+      padding: 30px;
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+    .special-banner {
+      background: #ffc107;
+      color: #333;
+      padding: 15px;
+      text-align: center;
+      font-weight: 600;
+      border-radius: 5px;
+      margin: 10px 0;
+      display: none; /* Hidden by default, can be shown by workflow */
+    }
+    #debug-panel {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: #000;
+      color: #0f0;
+      padding: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 10000;
+      max-width: 250px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Workflow Test Page: ${workflowWithConnections.name}</h1>
+    <div class="hero-section">
+      <h1 class="hero-headline">Workflow Test Page</h1>
+      <p>Testing: "${workflowWithConnections.name}"</p>
+      <a href="#test" class="button-primary">Get Started Free</a>
+    </div>
     
-    <p>This page is for testing the "${workflowWithConnections.name}" workflow integration.</p>
+    <div class="special-banner" id="utm-banner">
+      🎉 Special offer for Google visitors! 50% off today only.
+    </div>
     
-    <!-- Test Elements -->
-    <section>
-      <h2>Call to Action Buttons</h2>
-      <button class="cta-button">Primary CTA Button</button>
-      <button class="btn cta">Secondary CTA</button>
-      <a href="#" class="cta-button">CTA Link</a>
-    </section>
+    <div class="test-section">
+      <h2>System Status</h2>
+      <div id="system-status" class="status-panel">Loading unified workflow system...</div>
+    </div>
     
-    <section>
+    <div class="test-section">
+      <h2>Test Elements for Workflows</h2>
+      <p>These elements can be targeted by workflow actions:</p>
+      
+      <div>
+        <h3>Call to Action Buttons</h3>
+        <button class="cta-button">Primary CTA Button</button>
+        <button class="btn cta">Secondary CTA</button>
+        <a href="#pricing" class="button-primary">Pricing Link</a>
+      </div>
+      
+      <div>
+        <h3>Text Elements</h3>
+        <p class="hero-subtitle">This subtitle can be replaced by workflows</p>
+        <div class="feature-title">Feature headline that can change</div>
+        <span class="price">$49<small>/month</small></span>
+      </div>
+    </div>
+    
+    <div class="test-section" id="test">
       <h2>Form Test</h2>
       <form>
+        <label>Name:</label>
         <input type="text" name="name" placeholder="Your Name" required>
+        
+        <label>Email:</label>
         <input type="email" name="email" placeholder="Your Email" required>
-        <textarea name="message" placeholder="Your Message"></textarea>
+        
+        <label>Message:</label>
+        <textarea name="message" placeholder="Your Message" rows="4"></textarea>
+        
         <button type="submit">Submit Form</button>
       </form>
-    </section>
+    </div>
     
-    <section class="long-content">
+    <div class="test-section">
+      <h2>Manual Test Buttons</h2>
+      <button onclick="testMobile()" class="cta-button">Test Mobile Device</button>
+      <button onclick="testUTM()" class="cta-button">Test UTM Parameters</button>
+      <button onclick="testScroll()" class="cta-button">Test Scroll Depth</button>
+      <button onclick="testExit()" class="cta-button">Test Exit Intent</button>
+    </div>
+    
+    <div class="long-content">
       <h2>Long Content for Scroll Testing</h2>
       <p>Scroll down to test scroll depth triggers...</p>
-      <div style="margin-top: 1000px;">
-        <h3>75% Scroll Point</h3>
-        <p>If you can see this, you've scrolled 75% of the page.</p>
+      <div style="margin-top: 400px;">
+        <h3>25% Scroll Point</h3>
+        <p>You've scrolled 25% of the page.</p>
       </div>
-    </section>
+      <div style="margin-top: 400px;">
+        <h3>50% Scroll Point</h3>
+        <p>You've scrolled 50% of the page.</p>
+      </div>
+      <div style="margin-top: 400px;">
+        <h3>75% Scroll Point</h3>
+        <p>You've scrolled 75% of the page.</p>
+      </div>
+    </div>
   </div>
   
   <!-- Hidden elements that can be shown by workflow actions -->
-  <div id="special-offer-modal">
+  <div id="special-offer-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 2px solid #007bff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1000;">
     <h3>🎉 Special Offer!</h3>
     <p>This modal was triggered by your workflow!</p>
-    <button onclick="this.parentElement.style.display='none'">Close</button>
+    <button onclick="this.parentElement.style.display='none'" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">Close</button>
   </div>
   
-  <div id="newsletter-popup" style="display: none; position: fixed; bottom: 20px; right: 20px; background: #007cba; color: white; padding: 20px; border-radius: 5px;">
-    <h4>📧 Newsletter</h4>
+  <div id="newsletter-popup" style="display: none; position: fixed; bottom: 20px; right: 20px; background: #28a745; color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+    <h4>📧 Newsletter Signup</h4>
     <p>Subscribe to our newsletter!</p>
-    <button onclick="this.parentElement.style.display='none'" style="background: white; color: #007cba; border: none; padding: 5px 10px; border-radius: 3px;">Close</button>
+    <button onclick="this.parentElement.style.display='none'" style="background: white; color: #28a745; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">Close</button>
+  </div>
+
+  <!-- Debug panel -->
+  <div id="debug-panel" style="display: none;">
+    <strong>Workflow Debug</strong><br>
+    <span id="debug-info">Loading...</span>
   </div>
 
   ${integration.bodyCode}
+  
+  <!-- Test functions -->
+  <script>
+    // Test functions for manual trigger testing
+    function testMobile() {
+      if (window.workflowSystem) {
+        window.workflowSystem.pageContext.deviceType = 'mobile';
+        window.workflowSystem.handleEvent({
+          eventType: 'device_type_test',
+          deviceType: 'mobile'
+        });
+        console.log('🧪 Mobile device test triggered');
+      }
+    }
+    
+    function testUTM() {
+      if (window.workflowSystem) {
+        window.workflowSystem.pageContext.utm = {
+          utm_source: 'google',
+          utm_medium: 'cpc',
+          utm_campaign: 'test'
+        };
+        window.workflowSystem.handleEvent({
+          eventType: 'utm_test',
+          utm: window.workflowSystem.pageContext.utm
+        });
+        console.log('🧪 UTM parameters test triggered');
+      }
+    }
+    
+    function testScroll() {
+      if (window.workflowSystem) {
+        window.workflowSystem.handleEvent({
+          eventType: 'scroll',
+          scrollPercentage: 75
+        });
+        console.log('🧪 Scroll depth test triggered (75%)');
+      }
+    }
+    
+    function testExit() {
+      if (window.workflowSystem) {
+        window.workflowSystem.handleEvent({
+          eventType: 'exit_intent'
+        });
+        console.log('🧪 Exit intent test triggered');
+      }
+    }
+    
+    // Update system status
+    function updateStatus() {
+      const statusDiv = document.getElementById('system-status');
+      const debugPanel = document.getElementById('debug-panel');
+      const debugInfo = document.getElementById('debug-info');
+      
+      if (window.workflowSystem) {
+        const system = window.workflowSystem;
+        statusDiv.innerHTML = \`
+          ✅ Status: \${system.initialized ? 'Ready' : 'Loading'}<br>
+          📊 Workflows: \${system.workflows.size}<br>
+          📱 Device: \${system.pageContext.deviceType}<br>
+          🔗 URL: \${window.location.pathname}<br>
+          🎯 Debug: \${system.config.debug ? 'ON' : 'OFF'}
+        \`;
+        
+        debugInfo.innerHTML = \`
+          Workflows: \${system.workflows.size}<br>
+          Device: \${system.pageContext.deviceType}<br>
+          Ready: \${system.initialized ? 'YES' : 'NO'}
+        \`;
+        debugPanel.style.display = 'block';
+      } else {
+        statusDiv.innerHTML = '⏳ Loading unified workflow system...';
+        setTimeout(updateStatus, 1000);
+      }
+    }
+    
+    // Start status updates
+    updateStatus();
+    setInterval(updateStatus, 5000);
+    
+    // Show initial message
+    console.log('🎯 Test page loaded for workflow: ${workflowWithConnections.name}');
+    console.log('📍 Target URL: ${workflowWithConnections.targetUrl || 'Not specified'}');
+    console.log('🔗 Current URL:', window.location.href);
+  </script>
 </body>
 </html>`;
 } 

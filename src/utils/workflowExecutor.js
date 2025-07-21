@@ -199,62 +199,175 @@
       
       this.executedActions.add(actionKey);
       
+      // Transform action to standardized format if needed
+      const standardizedAction = this.transformActionToStandard(action);
+      
       if (this.config.debug) {
-        console.log(`⚡ Executing action: ${action.name}`, action.config);
+        console.log(`⚡ Executing action: ${standardizedAction.name}`, standardizedAction.config);
       }
 
       try {
-        switch (action.name) {
+        switch (standardizedAction.name) {
           case 'Replace Text':
-            await this.executeReplaceText(action.config);
+            await this.executeReplaceText(standardizedAction.config);
             break;
           
           case 'Hide Element':
-            await this.executeHideElement(action.config);
+            await this.executeHideElement(standardizedAction.config);
             break;
           
           case 'Show Element':
-            await this.executeShowElement(action.config);
+            await this.executeShowElement(standardizedAction.config);
             break;
           
           case 'Modify CSS':
-            await this.executeModifyCSS(action.config);
+            await this.executeModifyCSS(standardizedAction.config);
             break;
           
           case 'Add Class':
-            await this.executeAddClass(action.config);
+            await this.executeAddClass(standardizedAction.config);
             break;
           
           case 'Remove Class':
-            await this.executeRemoveClass(action.config);
+            await this.executeRemoveClass(standardizedAction.config);
             break;
           
           case 'Display Overlay':
-            await this.executeDisplayOverlay(action.config);
+            await this.executeDisplayOverlay(standardizedAction.config);
             break;
           
           case 'Redirect Page':
-            await this.executeRedirectPage(action.config);
+            await this.executeRedirectPage(standardizedAction.config);
             break;
           
           case 'Custom Event':
-            await this.executeCustomEvent(action.config);
+            await this.executeCustomEvent(standardizedAction.config);
             break;
           
           case 'Progressive Form':
-            await this.executeProgressiveForm(action.config);
+            await this.executeProgressiveForm(standardizedAction.config);
             break;
           
           case 'Dynamic Content':
-            await this.executeDynamicContent(action.config);
+            await this.executeDynamicContent(standardizedAction.config);
             break;
           
           default:
-            console.warn(`⚡ Unknown action type: ${action.name}`);
+            console.warn(`⚡ Unknown action type: ${standardizedAction.name}`);
         }
       } catch (error) {
-        console.error(`⚡ Error executing action ${action.name}:`, error);
+        console.error(`⚡ Error executing action ${standardizedAction.name}:`, error);
       }
+    }
+
+    /**
+     * Transform action to standardized format
+     * Handles both database format and legacy format
+     */
+    transformActionToStandard(action) {
+      // If action is already in standard format (has name and config), return as-is
+      if (action.name && action.config) {
+        return action;
+      }
+      
+      // If action is in legacy format (has type and target), transform to standard
+      if (action.type && action.target) {
+        const config = {
+          selector: action.target,
+          animation: action.animation || 'fade'
+        };
+        
+        // Add action-specific properties to config
+        switch (action.type) {
+          case 'replace_text':
+            config.newText = action.newText;
+            config.originalText = action.originalText;
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: 'Replace Text',
+              config
+            };
+            
+          case 'hide_element':
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: 'Hide Element',
+              config
+            };
+            
+          case 'show_element':
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: 'Show Element',
+              config
+            };
+            
+          case 'modify_css':
+            config.property = action.property;
+            config.value = action.value;
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: 'Modify CSS',
+              config
+            };
+            
+          case 'add_class':
+            config.className = action.className;
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: 'Add Class',
+              config
+            };
+            
+          case 'remove_class':
+            config.className = action.className;
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: 'Remove Class',
+              config
+            };
+            
+          case 'display_overlay':
+            config.content = action.content;
+            config.position = action.position || 'center';
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: 'Display Overlay',
+              config
+            };
+            
+          case 'redirect':
+            config.url = action.url;
+            config.delay = action.delay || 0;
+            config.newTab = action.newTab || false;
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: 'Redirect Page',
+              config
+            };
+            
+          case 'custom_event':
+            config.eventName = action.eventName;
+            config.eventData = action.eventData;
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: 'Custom Event',
+              config
+            };
+            
+          default:
+            console.warn(`⚡ Unknown legacy action type: ${action.type}`);
+            return {
+              id: action.id || `legacy-${Date.now()}`,
+              name: action.type,
+              config: { ...action }
+            };
+        }
+      }
+      
+      // Fallback: return action as-is with warning
+      console.warn('⚡ Action format not recognized:', action);
+      return action;
     }
 
     // Action Executors

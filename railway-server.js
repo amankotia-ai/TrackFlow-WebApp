@@ -86,15 +86,12 @@ curl ${req.protocol}://${req.get('host')}/api/health
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ 
-    status: 'ok',
-    platform: 'Railway',
+    status: 'healthy', 
     timestamp: new Date().toISOString(),
     endpoints: {
-      scrape: 'POST /api/scrape',
-      health: 'GET /api/health',
-      tracking_script: 'GET /tracking-script.js',
-      analytics: 'POST /api/analytics/track',
-      workflows: 'POST /api/workflows/trigger-check'
+      workflows: 'GET /api/workflows/active',
+      unified_system: 'GET /api/unified-workflow-system.js',
+      analytics: 'POST /api/analytics/track'
     }
   });
 });
@@ -177,22 +174,33 @@ app.get('/enhanced-tracking-script.js', (req, res) => {
 });
 
 // Serve workflow executor script
-app.get('/workflow-executor.js', (req, res) => {
-  try {
-    const workflowExecutorScript = fs.readFileSync(path.join(__dirname, 'src/utils/workflowExecutor.js'), 'utf8');
-    
-    // Set proper headers for JavaScript
-    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('ngrok-skip-browser-warning', 'true');
-    
-    console.log('🎯 Serving workflow executor script');
-    res.send(workflowExecutorScript);
-  } catch (error) {
-    console.error('❌ Error serving workflow executor script:', error);
-    res.status(500).json({ error: 'Failed to load workflow executor script' });
-  }
+app.get('/api/workflow-executor.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+  
+  const workflowExecutorScript = fs.readFileSync(path.join(__dirname, 'src/utils/workflowExecutor.js'), 'utf8');
+  console.log('📦 Serving workflow executor script');
+  res.send(workflowExecutorScript);
+});
+
+// Serve unified workflow system
+app.get('/api/unified-workflow-system.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+  
+  const unifiedSystemScript = fs.readFileSync(path.join(__dirname, 'src/utils/unifiedWorkflowSystem.js'), 'utf8');
+  console.log('📦 Serving unified workflow system script');
+  res.send(unifiedSystemScript);
+});
+
+// Legacy endpoint - deprecated, use unified system instead
+app.get('/api/element-tracker.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  
+  const elementTrackerScript = fs.readFileSync(path.join(__dirname, 'src/utils/elementTrackerEnhanced.js'), 'utf8');
+  console.log('📦 Serving element tracker script (legacy)');
+  res.send(elementTrackerScript);
 });
 
 // Handle preflight requests for tracking script
@@ -228,278 +236,6 @@ app.post('/api/analytics/track', async (req, res) => {
   }
 });
 
-// Workflow trigger check endpoint
-app.post('/api/workflows/trigger-check', async (req, res) => {
-  try {
-    const { event, workflowId } = req.body;
-    
-    console.log('🔄 Workflow trigger check:', workflowId, event?.type);
-    
-    if (!workflowId || !event) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing workflowId or event data',
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    // Fetch the workflow from database
-    const { data: workflow, error: fetchError } = await supabase
-      .from('workflows_with_nodes')
-      .select('*')
-      .eq('id', workflowId)
-      .eq('is_active', true)
-      .eq('status', 'active')
-      .single();
-    
-    if (fetchError || !workflow) {
-      console.log('❌ Workflow not found or inactive:', workflowId);
-      return res.json({
-        triggered: false,
-        actions: [],
-        workflowId,
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    // Parse nodes and connections
-    const nodes = workflow.nodes || [];
-    const connections = workflow.connections || [];
-    
-    console.log('📊 Workflow data:', {
-      workflowId,
-      name: workflow.name,
-      nodeCount: nodes.length,
-      connectionCount: connections.length,
-      nodes: nodes.map(n => ({ id: n.id, type: n.type, name: n.name, config: n.config }))
-    });
-    
-    console.log('📨 Event data received:', {
-      type: event.type || event.eventType,
-      deviceType: event.deviceType,
-      utm: event.utm,
-      visitCount: event.visitCount,
-      timeOnPage: event.timeOnPage,
-      scrollPercentage: event.scrollPercentage,
-      elementSelector: event.elementSelector || event.element
-    });
-    
-    // Find trigger nodes
-    const triggerNodes = nodes.filter(node => node.type === 'trigger');
-    let triggeredActions = [];
-    
-    // Evaluate each trigger
-    for (const trigger of triggerNodes) {
-      let isTriggered = false;
-      
-      console.log(`🔍 Evaluating trigger: ${trigger.name}`, trigger.config);
-      
-      // Evaluate trigger based on type
-      switch (trigger.name) {
-        case 'Device Type':
-          isTriggered = event.deviceType === trigger.config.deviceType;
-          console.log(`  Device check: ${event.deviceType} === ${trigger.config.deviceType} = ${isTriggered}`);
-          break;
-          
-        case 'UTM Parameters':
-          if (event.utm) {
-            const { parameter, value, operator } = trigger.config;
-            const utmValue = event.utm[parameter];
-            
-            console.log(`  UTM check: ${parameter}=${utmValue}, operator=${operator}, expected=${value}`);
-            
-            switch (operator) {
-              case 'equals':
-                isTriggered = utmValue === value;
-                break;
-              case 'contains':
-                isTriggered = utmValue && utmValue.includes(value);
-                break;
-              case 'exists':
-                isTriggered = Boolean(utmValue);
-                break;
-              default:
-                isTriggered = false;
-            }
-          }
-          break;
-          
-        case 'Page Visits':
-          const visitThreshold = trigger.config.visitCount || 3;
-          isTriggered = event.visitCount >= visitThreshold;
-          console.log(`  Page visits check: ${event.visitCount} >= ${visitThreshold} = ${isTriggered}`);
-          break;
-          
-        case 'Time on Page':
-          const duration = trigger.config.duration || 30;
-          const unit = trigger.config.unit || 'seconds';
-          const thresholdMs = unit === 'minutes' ? duration * 60000 : duration * 1000;
-          const timeOnPageMs = event.timeOnPage * 1000; // Convert seconds to ms
-          isTriggered = timeOnPageMs >= thresholdMs;
-          console.log(`  Time on page check: ${event.timeOnPage}s >= ${duration}${unit} = ${isTriggered}`);
-          break;
-          
-        case 'Scroll Depth':
-          const scrollThreshold = trigger.config.percentage || 50;
-          isTriggered = event.scrollPercentage >= scrollThreshold;
-          console.log(`  Scroll depth check: ${event.scrollPercentage}% >= ${scrollThreshold}% = ${isTriggered}`);
-          break;
-          
-        case 'Element Click':
-          const eventType = event.type || event.eventType;
-          const elementSelector = event.elementSelector || event.element;
-          isTriggered = eventType === 'click' && elementSelector === trigger.config.selector;
-          console.log(`  Element click check: type=${eventType}, selector=${elementSelector} === ${trigger.config.selector} = ${isTriggered}`);
-          break;
-          
-        case 'Exit Intent':
-          const exitEventType = event.type || event.eventType;
-          isTriggered = exitEventType === 'exit_intent';
-          console.log(`  Exit intent check: ${exitEventType} === 'exit_intent' = ${isTriggered}`);
-          break;
-          
-        default:
-          console.warn('Unknown trigger type:', trigger.name);
-      }
-      
-      // If triggered, find connected actions
-      if (isTriggered) {
-        console.log(`✅ Trigger matched: ${trigger.name}`);
-        
-        // Find all actions connected to this trigger
-        const connectedActionIds = connections
-          .filter(conn => conn.sourceNodeId === trigger.id)
-          .map(conn => conn.targetNodeId);
-        
-        const connectedActions = nodes
-          .filter(node => node.type === 'action' && connectedActionIds.includes(node.id))
-          .map(action => transformActionForClient(action, trigger.name));
-        
-        triggeredActions = [...triggeredActions, ...connectedActions];
-      }
-    }
-    
-    // Remove duplicates
-    const uniqueActions = Array.from(new Map(
-      triggeredActions.map(action => [`${action.type}-${action.target}`, action])
-    ).values());
-    
-    console.log(`🎯 Workflow ${workflowId}: ${uniqueActions.length} actions triggered`);
-    
-    res.json({
-      success: true,
-      triggered: uniqueActions.length > 0,
-      actions: uniqueActions,
-      workflowId,
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    console.error('❌ Workflow trigger check error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to check workflow triggers',
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-// Helper function to transform database action to client format
-function transformActionForClient(action, triggerName) {
-  const baseAction = {
-    delay: 0,
-    triggeredBy: triggerName
-  };
-  
-  switch (action.name) {
-    case 'Replace Text':
-      return {
-        ...baseAction,
-        type: 'replace_text',
-        target: action.config.selector,
-        newText: action.config.newText,
-        originalText: action.config.originalText,
-        animation: 'fade'
-      };
-      
-    case 'Hide Element':
-      return {
-        ...baseAction,
-        type: 'hide_element',
-        target: action.config.selector,
-        animation: action.config.animation || 'fade'
-      };
-      
-    case 'Show Element':
-      return {
-        ...baseAction,
-        type: 'show_element',
-        target: action.config.selector,
-        animation: action.config.animation || 'fade'
-      };
-      
-    case 'Modify CSS':
-      return {
-        ...baseAction,
-        type: 'modify_css',
-        target: action.config.selector,
-        property: action.config.property,
-        value: action.config.value
-      };
-      
-    case 'Add Class':
-      return {
-        ...baseAction,
-        type: 'add_class',
-        target: action.config.selector,
-        className: action.config.className
-      };
-      
-    case 'Remove Class':
-      return {
-        ...baseAction,
-        type: 'remove_class',
-        target: action.config.selector,
-        className: action.config.className
-      };
-      
-    case 'Display Overlay':
-      return {
-        ...baseAction,
-        type: 'display_overlay',
-        content: action.config.content,
-        animation: action.config.animation || 'fade',
-        position: action.config.position || 'center'
-      };
-      
-    case 'Redirect':
-      return {
-        ...baseAction,
-        type: 'redirect',
-        url: action.config.url,
-        delay: action.config.delay || 0,
-        newTab: action.config.newTab || false
-      };
-      
-    case 'Custom Event':
-      return {
-        ...baseAction,
-        type: 'custom_event',
-        eventName: action.config.eventName,
-        eventData: action.config.eventData
-      };
-      
-    default:
-      console.warn('Unknown action type:', action.name);
-      return {
-        ...baseAction,
-        type: action.name.toLowerCase().replace(/ /g, '_'),
-        target: action.config.selector || '',
-        config: action.config
-      };
-  }
-}
-
 // Get active workflows endpoint
 app.get('/api/workflows/active', async (req, res) => {
   try {
@@ -523,16 +259,100 @@ app.get('/api/workflows/active', async (req, res) => {
       });
     }
     
-    // Filter workflows that match the URL
+    // Enhanced URL matching logic
     const activeWorkflows = workflows.filter(workflow => {
-      // Match all pages with wildcard
-      if (workflow.target_url === '*') return true;
-      // Match specific URLs
-      if (workflow.target_url && url && url.includes(workflow.target_url)) return true;
-      return false;
+      const targetUrl = workflow.target_url;
+      
+      if (!targetUrl || !url) return false;
+      
+      try {
+        const currentUrl = new URL(url);
+        
+        // Universal match - runs on all pages
+        if (targetUrl === '*') {
+          console.log(`✅ Universal match for workflow: ${workflow.name}`);
+          return true;
+        }
+        
+        // Exact URL match
+        if (targetUrl === url) {
+          console.log(`✅ Exact match for workflow: ${workflow.name}`);
+          return true;
+        }
+        
+        // Path-based matching
+        if (targetUrl.startsWith('/')) {
+          const matches = currentUrl.pathname.includes(targetUrl);
+          if (matches) {
+            console.log(`✅ Path match for workflow: ${workflow.name} (${targetUrl})`);
+          }
+          return matches;
+        }
+        
+        // Domain-based matching
+        if (targetUrl.includes('.')) {
+          const matches = currentUrl.hostname.includes(targetUrl);
+          if (matches) {
+            console.log(`✅ Domain match for workflow: ${workflow.name} (${targetUrl})`);
+          }
+          return matches;
+        }
+        
+        // Query parameter matching
+        if (targetUrl.includes('?') || targetUrl.includes('=')) {
+          const targetParams = new URLSearchParams(targetUrl.split('?')[1] || targetUrl);
+          const currentParams = currentUrl.searchParams;
+          
+          for (const [key, value] of targetParams) {
+            if (currentParams.get(key) !== value) {
+              return false;
+            }
+          }
+          console.log(`✅ Query param match for workflow: ${workflow.name}`);
+          return true;
+        }
+        
+        // Regex pattern matching (advanced)
+        if (targetUrl.startsWith('regex:')) {
+          const pattern = targetUrl.replace('regex:', '');
+          const regex = new RegExp(pattern);
+          const matches = regex.test(url);
+          if (matches) {
+            console.log(`✅ Regex match for workflow: ${workflow.name} (${pattern})`);
+          }
+          return matches;
+        }
+        
+        // Subdomain matching
+        if (targetUrl.startsWith('subdomain:')) {
+          const subdomain = targetUrl.replace('subdomain:', '');
+          const matches = currentUrl.hostname.startsWith(subdomain + '.');
+          if (matches) {
+            console.log(`✅ Subdomain match for workflow: ${workflow.name} (${subdomain})`);
+          }
+          return matches;
+        }
+        
+        // Contains matching (fallback)
+        const matches = url.includes(targetUrl);
+        if (matches) {
+          console.log(`✅ Contains match for workflow: ${workflow.name} (${targetUrl})`);
+        }
+        return matches;
+        
+      } catch (urlError) {
+        console.warn(`⚠️ Invalid URL format: ${url}, using simple string matching`);
+        // Fallback to simple string matching if URL parsing fails
+        return url.includes(targetUrl);
+      }
     });
     
     console.log(`✅ Found ${activeWorkflows.length} active workflows for URL: ${url}`);
+    
+    // Log which workflows matched for debugging
+    activeWorkflows.forEach(workflow => {
+      console.log(`📋 Active workflow: ${workflow.name} (target: ${workflow.target_url})`);
+    });
     
     res.json({
       success: true,
@@ -649,7 +469,7 @@ app.listen(PORT, () => {
   console.log(`🕷️ Scrape: POST http://localhost:${PORT}/api/scrape`);
   console.log(`🎯 Tracking: http://localhost:${PORT}/tracking-script.js`);
   console.log(`📊 Analytics: POST http://localhost:${PORT}/api/analytics/track`);
-  console.log(`🔄 Workflows: POST http://localhost:${PORT}/api/workflows/trigger-check`);
+  console.log(`🔄 Workflows: GET http://localhost:${PORT}/api/workflows/active`);
   console.log(`🌐 Frontend: http://localhost:${PORT}/`);
 });
 
