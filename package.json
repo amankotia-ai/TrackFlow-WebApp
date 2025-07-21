@@ -8,6 +8,8 @@
     "dev:server": "node server.js",
     "dev:all": "concurrently \"npm run dev:server\" \"npm run dev\"",
     "build": "vite build",
+    "start": "node api/index.js",
+    "vercel-build": "echo 'No build step required for serverless'",
     "lint": "eslint .",
     "preview": "vite preview"
   },
