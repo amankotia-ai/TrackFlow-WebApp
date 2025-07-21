@@ -26,24 +26,34 @@ interface MetricCardProps {
   suffix?: string;
 }
 
-const analyticsData = {
-  overview: {
-    totalExecutions: 45678,
-    successRate: 97.8,
-    avgExecutionTime: 1.2,
-    conversionLift: 15.3
-  },
-  topPlaybooks: [
-    { name: 'Mobile CTA Optimization', executions: 12450, successRate: 98.5 },
-    { name: 'UTM Campaign Personalization', executions: 8920, successRate: 97.2 },
-    { name: 'Scroll Engagement Boost', executions: 7890, successRate: 96.8 },
-    { name: 'Time-based Content Switch', executions: 6540, successRate: 95.9 },
-    { name: 'Location-based Offers', executions: 5430, successRate: 94.3 }
-  ]
-};
-
 const Analytics: React.FC<AnalyticsProps> = ({ workflows }) => {
   const [timeRange, setTimeRange] = useState('7d');
+
+  // Calculate real analytics from actual workflow data
+  const analyticsData = React.useMemo(() => {
+    const totalExecutions = workflows.reduce((sum, workflow) => sum + workflow.executions, 0);
+    const activeWorkflows = workflows.filter(w => w.status === 'active').length;
+    
+    // Sort workflows by execution count for top performers
+    const sortedWorkflows = [...workflows]
+      .sort((a, b) => b.executions - a.executions)
+      .slice(0, 5);
+
+    return {
+      overview: {
+        totalExecutions,
+        totalWorkflows: workflows.length,
+        activeWorkflows,
+        avgExecutionsPerWorkflow: workflows.length > 0 ? Math.round(totalExecutions / workflows.length) : 0
+      },
+      topPlaybooks: sortedWorkflows.map(workflow => ({
+        name: workflow.name,
+        executions: workflow.executions,
+        status: workflow.status,
+        lastRun: workflow.lastRun
+      }))
+    };
+  }, [workflows]);
 
   const MetricCard: React.FC<MetricCardProps> = ({ title, value, change, changeType, icon: Icon, suffix = '' }) => (
     <div className="bg-white rounded-lg p-6 border border-secondary-200">
@@ -129,33 +139,30 @@ const Analytics: React.FC<AnalyticsProps> = ({ workflows }) => {
             <MetricCard
               title="Total Executions"
               value={analyticsData.overview.totalExecutions.toLocaleString()}
-              change="+12.5%"
-              changeType="positive"
+              change={analyticsData.overview.totalExecutions > 0 ? "Real data" : "No executions yet"}
+              changeType={analyticsData.overview.totalExecutions > 0 ? "positive" : "negative"}
               icon={Activity}
             />
             <MetricCard
-              title="Success Rate"
-              value={analyticsData.overview.successRate.toString()}
-              change="+2.1%"
+              title="Total Playbooks"
+              value={analyticsData.overview.totalWorkflows.toString()}
+              change={`${analyticsData.overview.activeWorkflows} active`}
               changeType="positive"
               icon={CheckCircle}
-              suffix="%"
             />
             <MetricCard
-              title="Avg. Execution Time"
-              value={analyticsData.overview.avgExecutionTime.toString()}
-              change="-0.2s"
+              title="Active Playbooks"
+              value={analyticsData.overview.activeWorkflows.toString()}
+              change={`${analyticsData.overview.totalWorkflows - analyticsData.overview.activeWorkflows} inactive`}
               changeType="positive"
               icon={Clock}
-              suffix="s"
             />
             <MetricCard
-              title="Conversion Lift"
-              value={analyticsData.overview.conversionLift.toString()}
-              change="+3.2%"
+              title="Avg. per Playbook"
+              value={analyticsData.overview.avgExecutionsPerWorkflow.toString()}
+              change="executions"
               changeType="positive"
               icon={TrendingUp}
-              suffix="%"
             />
           </div>
 
@@ -165,41 +172,56 @@ const Analytics: React.FC<AnalyticsProps> = ({ workflows }) => {
               <h3 className="text-lg font-semibold text-secondary-900">Top Performing Playbooks</h3>
             </div>
             <div className="divide-y divide-secondary-100">
-              {analyticsData.topPlaybooks.map((playbook, index) => {
-                const colors = ['bg-green-500', 'bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500'];
-                const successPercentage = (playbook.successRate / 100) * 100;
-                
-                return (
-                  <div key={index} className="px-6 py-4 hover:bg-secondary-50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-4 flex-1">
-                        <div className={`w-3 h-3 rounded-full ${colors[index % colors.length]}`} />
-                        <div className="font-medium text-secondary-900">{playbook.name}</div>
-                        <div className="flex items-center space-x-2">
-                          <div className="w-20 h-2 bg-secondary-200 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                              style={{ width: `${Math.min(successPercentage, 100)}%` }}
-                            />
+              {analyticsData.topPlaybooks.length > 0 ? (
+                analyticsData.topPlaybooks.map((playbook, index) => {
+                  const colors = ['bg-green-500', 'bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500'];
+                  const maxExecutions = Math.max(...analyticsData.topPlaybooks.map(p => p.executions));
+                  const executionPercentage = maxExecutions > 0 ? (playbook.executions / maxExecutions) * 100 : 0;
+                  
+                  return (
+                    <div key={index} className="px-6 py-4 hover:bg-secondary-50 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-4 flex-1">
+                          <div className={`w-3 h-3 rounded-full ${colors[index % colors.length]}`} />
+                          <div className="font-medium text-secondary-900">{playbook.name}</div>
+                          <div className="flex items-center space-x-2">
+                            <div className="w-20 h-2 bg-secondary-200 rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                                style={{ width: `${Math.min(executionPercentage, 100)}%` }}
+                              />
+                            </div>
+                            <span className="text-sm text-secondary-600 min-w-0">
+                              {playbook.executions.toLocaleString()} executions
+                            </span>
                           </div>
-                          <span className="text-sm text-secondary-600 min-w-0">
-                            {playbook.executions.toLocaleString()} / {Math.round(playbook.executions * 1.2).toLocaleString()}
+                          <span className={`text-sm px-2 py-1 rounded-full text-xs font-medium ${
+                            playbook.status === 'active' ? 'bg-green-100 text-green-800' :
+                            playbook.status === 'paused' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-secondary-100 text-secondary-800'
+                          }`}>
+                            {playbook.status}
                           </span>
                         </div>
-                        <span className="text-sm text-secondary-500">
-                          {playbook.successRate}% success
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-medium text-secondary-900">
-                          {playbook.executions.toLocaleString()}
+                        <div className="text-right">
+                          <div className="text-sm font-medium text-secondary-900">
+                            {playbook.executions.toLocaleString()}
+                          </div>
+                          <div className="text-xs text-secondary-500">
+                            {playbook.lastRun ? new Date(playbook.lastRun).toLocaleDateString() : 'Never run'}
+                          </div>
                         </div>
-                        <div className="text-xs text-secondary-500">executions</div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              ) : (
+                <div className="px-6 py-8 text-center">
+                  <div className="text-secondary-400 text-4xl mb-2">📊</div>
+                  <h3 className="text-lg font-medium text-secondary-900 mb-1">No Playbooks Yet</h3>
+                  <p className="text-sm text-secondary-600">Create your first playbook to see execution analytics here.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>

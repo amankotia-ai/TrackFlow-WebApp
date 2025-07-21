@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Activity, 
   Clock, 
@@ -15,35 +15,66 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { AnalyticsService, UserStats, WorkflowExecution } from '../services/analyticsService';
+import { Workflow } from '../types/workflow';
 
-const Dashboard: React.FC = () => {
+interface DashboardProps {
+  workflows?: Workflow[];
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ workflows = [] }) => {
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [recentExecutions, setRecentExecutions] = useState<WorkflowExecution[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
     const loadDashboardData = async () => {
+      if (!isMountedRef.current) return;
+      
       try {
         setLoading(true);
         setError(null);
 
+        // Safety timeout for dashboard loading
+        const loadingTimeout = setTimeout(() => {
+          if (isMountedRef.current) {
+            console.warn('Dashboard loading timeout reached');
+            setLoading(false);
+            setError('Dashboard is taking longer than expected to load. Please refresh.');
+          }
+        }, 20000);
+
+        // Load data using the new AnalyticsService
         const [stats, executions] = await Promise.all([
           AnalyticsService.getUserStats(),
           AnalyticsService.getWorkflowExecutions(undefined, 10)
         ]);
+        
+        clearTimeout(loadingTimeout);
 
-        setUserStats(stats);
-        setRecentExecutions(executions);
+        if (isMountedRef.current) {
+          setUserStats(stats);
+          setRecentExecutions(executions);
+        }
       } catch (err) {
         console.error('Error loading dashboard data:', err);
-        setError('Failed to load dashboard data');
+        if (isMountedRef.current) {
+          setError('Failed to load dashboard data');
+        }
       } finally {
-        setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     };
 
+    isMountedRef.current = true;
     loadDashboardData();
+    
+    return () => {
+      isMountedRef.current = false;
+    };
   }, []);
 
   const formatNumber = (num: number): string => {
@@ -56,15 +87,48 @@ const Dashboard: React.FC = () => {
   };
 
   const getStatsData = () => {
-    if (!userStats) {
+    // Calculate stats from workflows if userStats is not available
+    const totalExecutions = workflows.reduce((sum, workflow) => sum + workflow.executions, 0);
+    const activeWorkflows = workflows.filter(w => w.status === 'active').length;
+    const totalWorkflows = workflows.length;
+
+    // Use actual workflow data if userStats is not available or seems outdated
+    const useWorkflowData = !userStats || (userStats.total_workflows === 0 && totalWorkflows > 0);
+
+    if (useWorkflowData) {
       return [
-        { label: 'Total Playbooks', value: '0', change: '', changeType: 'neutral' as const, icon: Activity },
-        { label: 'Active Playbooks', value: '0', change: '', changeType: 'neutral' as const, icon: CheckCircle },
-        { label: 'Total Executions', value: '0', change: '', changeType: 'neutral' as const, icon: Zap },
-        { label: 'Success Rate', value: '0%', change: '', changeType: 'neutral' as const, icon: TrendingUp }
+        { 
+          label: 'Total Playbooks', 
+          value: totalWorkflows.toString(), 
+          change: `${activeWorkflows} active`, 
+          changeType: 'positive' as const,
+          icon: Activity 
+        },
+        { 
+          label: 'Active Playbooks', 
+          value: activeWorkflows.toString(), 
+          change: `${totalWorkflows - activeWorkflows} inactive`, 
+          changeType: 'positive' as const,
+          icon: CheckCircle 
+        },
+        { 
+          label: 'Total Executions', 
+          value: formatNumber(totalExecutions), 
+          change: totalExecutions > 0 ? 'Real execution data' : 'No executions yet', 
+          changeType: totalExecutions > 0 ? 'positive' : 'negative' as const,
+          icon: Zap 
+        },
+        { 
+          label: 'Avg. per Playbook', 
+          value: totalWorkflows > 0 ? Math.round(totalExecutions / totalWorkflows).toString() : '0', 
+          change: 'executions per playbook', 
+          changeType: 'positive' as const,
+          icon: TrendingUp 
+        }
       ];
     }
 
+    // Use userStats if available and seems current
     return [
       { 
         label: 'Total Playbooks', 
@@ -77,7 +141,7 @@ const Dashboard: React.FC = () => {
         label: 'Active Playbooks', 
         value: userStats.active_workflows.toString(), 
         change: `${userStats.total_workflows - userStats.active_workflows} inactive`, 
-        changeType: 'neutral' as const,
+        changeType: 'positive' as const,
         icon: CheckCircle 
       },
       { 
@@ -91,7 +155,7 @@ const Dashboard: React.FC = () => {
         label: 'Success Rate', 
         value: `${userStats.avg_success_rate.toFixed(1)}%`, 
         change: userStats.avg_success_rate >= 90 ? 'Excellent' : userStats.avg_success_rate >= 70 ? 'Good' : 'Needs improvement', 
-        changeType: userStats.avg_success_rate >= 90 ? 'positive' : userStats.avg_success_rate >= 70 ? 'neutral' : 'negative' as const,
+        changeType: userStats.avg_success_rate >= 90 ? 'positive' : 'negative' as const,
         icon: TrendingUp 
       }
     ];

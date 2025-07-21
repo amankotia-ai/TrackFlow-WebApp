@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Workflow } from './types/workflow';
 import { WorkflowService } from './services/workflowService';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -10,9 +10,10 @@ import Templates from './components/Templates';
 import Analytics from './components/Analytics';
 import ApiKeyManager from './components/ApiKeyManager';
 import Auth from './components/Auth';
+import ErrorBoundary from './components/ErrorBoundary';
 import { Loader2, AlertCircle } from 'lucide-react';
 
-// Loading component
+// Simple loading component
 function LoadingScreen() {
   return (
     <div className="min-h-screen bg-secondary-50 flex items-center justify-center">
@@ -24,7 +25,7 @@ function LoadingScreen() {
   );
 }
 
-// Authenticated App Component
+// Main authenticated app component
 function AuthenticatedApp() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
@@ -32,31 +33,47 @@ function AuthenticatedApp() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
 
-  // Load user workflows and templates on mount
+  // Load data on mount - simple and clean
   useEffect(() => {
     const loadData = async () => {
+      if (!isMountedRef.current) return;
+
+      console.log('🚀 Loading app data...');
+      setLoading(true);
+      setError(null);
+
       try {
-        setLoading(true);
-        setError(null);
-        
         // Load workflows and templates in parallel
         const [userWorkflows, workflowTemplates] = await Promise.all([
           WorkflowService.getUserWorkflows(),
           WorkflowService.getWorkflowTemplates()
         ]);
-        
-        setWorkflows(userWorkflows);
-        setTemplates(workflowTemplates);
-      } catch (err) {
+
+        if (isMountedRef.current) {
+          setWorkflows(userWorkflows);
+          setTemplates(workflowTemplates);
+          console.log(`✅ Loaded ${userWorkflows.length} workflows and ${workflowTemplates.length} templates`);
+        }
+      } catch (err: any) {
         console.error('Error loading data:', err);
-        setError('Failed to load workflows. Please refresh the page.');
+        if (isMountedRef.current) {
+          setError(err.message || 'Failed to load data. Please try refreshing the page.');
+        }
       } finally {
-        setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     };
 
+    isMountedRef.current = true;
     loadData();
+
+    return () => {
+      isMountedRef.current = false;
+    };
   }, []);
 
   const handleWorkflowSelect = (workflow: Workflow) => {
@@ -83,60 +100,37 @@ function AuthenticatedApp() {
 
   const handleWorkflowSave = async (workflow: Workflow) => {
     try {
+      console.log(`💾 Saving workflow: ${workflow.name}`);
       const savedWorkflow = await WorkflowService.saveWorkflow(workflow);
       
-      // Update the workflows list
-      setWorkflows(prev => {
-        const existingIndex = prev.findIndex(w => w.id === workflow.id);
-        if (existingIndex >= 0) {
-          // Update existing workflow
-          const updated = [...prev];
-          updated[existingIndex] = savedWorkflow;
-          return updated;
-        } else {
-          // Add new workflow
-          return [...prev, savedWorkflow];
-        }
-      });
+      setWorkflows(prev => 
+        prev.map(w => w.id === workflow.id ? savedWorkflow : w)
+      );
       
-      setSelectedWorkflow(null);
-      setActiveTab('workflows');
-    } catch (err) {
-      console.error('Error saving workflow:', err);
-      setError('Failed to save workflow. Please try again.');
+      setSelectedWorkflow(savedWorkflow);
+      console.log('✅ Workflow saved successfully');
+    } catch (error: any) {
+      console.error('Error saving workflow:', error);
+      alert(`Failed to save workflow: ${error.message}`);
     }
   };
 
-  const handleTemplateUse = (template: Workflow) => {
-    const newWorkflow: Workflow = {
-      ...template,
-      id: `workflow-${Date.now()}`,
-      name: `${template.name} (Copy)`,
-      isActive: false,
-      status: 'draft',
-      executions: 0,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    setSelectedWorkflow(newWorkflow);
-  };
-
-  const handleWorkflowImport = (importedWorkflow: Workflow) => {
-    setWorkflows(prev => [...prev, importedWorkflow]);
-    setSelectedWorkflow(importedWorkflow);
-  };
-
-  const handleWorkflowUpdate = (updatedWorkflow: Workflow) => {
-    // Update the workflow in the list
-    setWorkflows(prev => {
-      const index = prev.findIndex(w => w.id === updatedWorkflow.id);
-      if (index >= 0) {
-        const updated = [...prev];
-        updated[index] = updatedWorkflow;
-        return updated;
+  const handleWorkflowDelete = async (workflowId: string) => {
+    try {
+      console.log(`🗑️ Deleting workflow: ${workflowId}`);
+      await WorkflowService.deleteWorkflow(workflowId);
+      
+      setWorkflows(prev => prev.filter(w => w.id !== workflowId));
+      
+      if (selectedWorkflow?.id === workflowId) {
+        setSelectedWorkflow(null);
       }
-      return prev;
-    });
+      
+      console.log('✅ Workflow deleted successfully');
+    } catch (error: any) {
+      console.error('Error deleting workflow:', error);
+      alert(`Failed to delete workflow: ${error.message}`);
+    }
   };
 
   const renderContent = () => {
@@ -170,67 +164,45 @@ function AuthenticatedApp() {
       );
     }
 
+    // Show workflow builder if a workflow is selected
     if (selectedWorkflow) {
       return (
-        <WorkflowBuilder
-          workflow={selectedWorkflow}
-          onBack={() => setSelectedWorkflow(null)}
-          onSave={handleWorkflowSave}
-        />
+        <ErrorBoundary>
+          <WorkflowBuilder
+            workflow={selectedWorkflow}
+            onBack={() => setSelectedWorkflow(null)}
+            onSave={handleWorkflowSave}
+          />
+        </ErrorBoundary>
       );
     }
 
+    // Show main content based on active tab
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard workflows={workflows} />;
       case 'workflows':
         return (
           <WorkflowList
             workflows={workflows}
             onWorkflowSelect={handleWorkflowSelect}
             onCreateWorkflow={handleCreateWorkflow}
-            onWorkflowImport={handleWorkflowImport}
-            onWorkflowUpdate={handleWorkflowUpdate}
           />
         );
       case 'templates':
-        return (
-          <Templates
-            templates={templates}
-            onTemplateUse={handleTemplateUse}
-          />
-        );
-      case 'executions':
+        return <Templates templates={templates} onTemplateUse={handleWorkflowSelect} />;
+      case 'analytics':
         return <Analytics workflows={workflows} />;
-      case 'settings':
-        return (
-          <div className="flex-1 bg-secondary-50">
-            <div className="max-w-4xl mx-auto p-8">
-              <div className="mb-8">
-                <h1 className="text-3xl font-medium text-secondary-900 tracking-tight">Settings</h1>
-                <p className="text-sm text-secondary-600">Manage your account and integration settings</p>
-              </div>
-              
-              <div className="bg-white border border-secondary-200 rounded-lg p-6">
-                <ApiKeyManager />
-              </div>
-            </div>
-          </div>
-        );
-      case 'profile':
-        return <div className="flex-1 p-8 bg-secondary-50">Profile coming soon...</div>;
+      case 'api-keys':
+        return <ApiKeyManager />;
       default:
-        return <Dashboard />;
+        return <Dashboard workflows={workflows} />;
     }
   };
 
   return (
     <div className="h-screen bg-secondary-50">
-      <Sidebar 
-        activeTab={activeTab} 
-        onTabChange={setActiveTab} 
-        onCreateWorkflow={handleCreateWorkflow}
-      />
+      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} onCreateWorkflow={handleCreateWorkflow} />
       <div className="ml-64">
         {renderContent()}
       </div>
@@ -238,7 +210,7 @@ function AuthenticatedApp() {
   );
 }
 
-// Main App with Auth Logic
+// Main app with auth wrapper
 function AppContent() {
   const { user, loading } = useAuth();
 
@@ -253,11 +225,14 @@ function AppContent() {
   return <AuthenticatedApp />;
 }
 
+// Root app component
 function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

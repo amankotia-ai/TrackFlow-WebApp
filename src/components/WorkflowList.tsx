@@ -317,8 +317,11 @@ const WorkflowList: React.FC<WorkflowListProps> = ({
                   <div className="flex items-center justify-between text-sm text-secondary-600">
                     <div className="flex items-center space-x-6">
                       <span>{workflow.nodes.length} nodes</span>
-                      <span>{workflow.executions} executions</span>
+                      <span className="font-medium text-primary-600">{workflow.executions} executions</span>
                       <span>Updated {workflow.updatedAt.toLocaleDateString()}</span>
+                      {workflow.lastRun && (
+                        <span className="text-xs">Last run: {workflow.lastRun.toLocaleDateString()}</span>
+                      )}
                     </div>
                     <div className="flex items-center space-x-2">
                       <span className="text-secondary-500">•</span>

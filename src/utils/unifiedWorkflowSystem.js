@@ -416,7 +416,24 @@
               }
             });
             
-            await this.executeActions(actions);
+            // Track workflow execution start time
+            const executionStartTime = performance.now();
+            
+            // Execute the actions
+            const executedActions = await this.executeActions(actions);
+            
+            // Calculate execution time
+            const executionTime = Math.round(performance.now() - executionStartTime);
+            
+            // Track the workflow execution
+            await this.trackWorkflowExecution(workflow, {
+              status: 'success',
+              executionTimeMs: executionTime,
+              pageUrl: window.location.href,
+              deviceType: this.pageContext.deviceType,
+              triggerName: trigger.name,
+              actionsExecuted: executedActions || []
+            });
           }
         }
       }
@@ -499,10 +516,12 @@
     async executeActions(actions) {
       if (!actions?.length) {
         this.log('⚠️ No actions to execute', 'warning');
-        return;
+        return [];
       }
       
       this.log(`🎬 Executing ${actions.length} actions`, 'info', actions);
+      
+      const executedActions = [];
       
       // Execute content replacement actions immediately in parallel for better performance
       const contentActions = actions.filter(action => action.name === 'Replace Text');
@@ -513,19 +532,48 @@
       // Execute content replacements in parallel for speed
       if (contentActions.length > 0) {
         this.log(`⚡ Executing ${contentActions.length} content replacement actions in parallel`);
-        const contentPromises = contentActions.map(action => this.executeAction(action));
+        const contentPromises = contentActions.map(async (action) => {
+          const startTime = performance.now();
+          const result = await this.executeAction(action);
+          const executionTime = Math.round(performance.now() - startTime);
+          
+          if (result.success) {
+            executedActions.push({
+              name: action.name,
+              config: action.config,
+              selector: action.config?.selector,
+              text: action.config?.newText || action.config?.text,
+              executionTimeMs: executionTime
+            });
+          }
+          
+          return result;
+        });
         await Promise.all(contentPromises);
       }
       
       // Execute other actions sequentially with delay
       for (const action of otherActions) {
-        await this.executeAction(action);
+        const startTime = performance.now();
+        const result = await this.executeAction(action);
+        const executionTime = Math.round(performance.now() - startTime);
+        
+        if (result.success) {
+          executedActions.push({
+            name: action.name,
+            config: action.config,
+            selector: action.config?.selector,
+            executionTimeMs: executionTime
+          });
+        }
         
         // Add delay between actions if configured
         if (this.config.executionDelay > 0) {
           await this.delay(this.config.executionDelay);
         }
       }
+      
+      return executedActions;
     }
 
     /**
@@ -1106,6 +1154,62 @@
       }
     }
 
+    /**
+     * Track workflow execution to analytics endpoint
+     */
+    async trackWorkflowExecution(workflow, executionData) {
+      try {
+        // Don't track if no API endpoint configured
+        if (!this.config.apiEndpoint) {
+          this.log('⚠️ No API endpoint configured for execution tracking', 'warning');
+          return;
+        }
+
+        const trackingPayload = {
+          workflowId: workflow.id,
+          userId: workflow.user_id || null, // May be null for public workflows
+          status: executionData.status || 'success',
+          executionTimeMs: executionData.executionTimeMs,
+          pageUrl: executionData.pageUrl || window.location.href,
+          sessionId: this.generateSessionId(),
+          userAgent: navigator.userAgent,
+          deviceType: executionData.deviceType,
+          actions: executionData.actionsExecuted || []
+        };
+
+        this.log(`📊 Tracking execution for workflow: ${workflow.name}`, 'info', trackingPayload);
+
+        const response = await fetch(`${this.config.apiEndpoint}/api/track-execution`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(trackingPayload)
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          this.log(`✅ Execution tracked successfully: ${result.executionId}`, 'success');
+        } else {
+          const error = await response.text();
+          this.log(`❌ Failed to track execution: ${response.status} - ${error}`, 'error');
+        }
+      } catch (error) {
+        this.log(`❌ Error tracking workflow execution: ${error.message}`, 'error');
+        // Don't throw - tracking failure shouldn't break workflow execution
+      }
+    }
+
+    /**
+     * Generate a simple session ID for tracking
+     */
+    generateSessionId() {
+      if (!this._sessionId) {
+        this._sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      }
+      return this._sessionId;
+    }
+
     delay(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
     }
@@ -1114,8 +1218,8 @@
   // Global API
   window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
 
-  // Auto-initialize if not already done (like utm-magic.js)
-  if (!window.workflowSystem) {
+  // Auto-initialize if not already done and not disabled
+  if (!window.workflowSystem && !window.DISABLE_LEGACY_WORKFLOWS) {
     window.workflowSystem = new UnifiedWorkflowSystem();
     
     // Priority initialization for immediate content replacement

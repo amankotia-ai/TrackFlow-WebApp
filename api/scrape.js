@@ -46,7 +46,12 @@ export default async function handler(req, res) {
       targetUrl = `https://${url}`;
     }
 
-    // Fetch HTML from the URL with timeout
+    // Fetch HTML from the URL with proper timeout handling
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Request timeout')), 20000);
+    });
+    
     const response = await Promise.race([
       axios.get(targetUrl, {
         timeout: 15000,
@@ -65,12 +70,12 @@ export default async function handler(req, res) {
         maxRedirects: 5,
         validateStatus: (status) => status < 400
       }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Request timeout')), 20000)
-      )
+      timeoutPromise
     ]);
-
-    const html = response.data;
+    
+    clearTimeout(timeoutId);
+      
+      const html = response.data;
     const $ = cheerio.load(html);
 
     console.log(`📄 HTML received, length: ${html.length}`);

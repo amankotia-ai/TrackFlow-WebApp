@@ -688,18 +688,51 @@
         if (triggerMatches) {
           console.log(`🎯 Workflow triggered: ${workflow.name}`);
           
+          // Track execution start time
+          const executionStartTime = performance.now();
+          
           // Find connected action nodes
           const actionNodes = this.getConnectedActions(workflow, triggerNode.id);
           
+          const executedActions = [];
+          
           // Execute actions in sequence
           for (const actionNode of actionNodes) {
-            await this.executeAction(actionNode, { workflow, trigger: triggerNode });
+            const actionStartTime = performance.now();
+            
+            try {
+              await this.executeAction(actionNode, { workflow, trigger: triggerNode });
+              
+              const actionExecutionTime = Math.round(performance.now() - actionStartTime);
+              executedActions.push({
+                name: actionNode.name,
+                config: actionNode.config,
+                selector: actionNode.config?.selector,
+                executionTimeMs: actionExecutionTime
+              });
+              
+            } catch (error) {
+              console.error(`Error executing action ${actionNode.name}:`, error);
+            }
             
             // Add delay between actions if configured
             if (this.config.executionDelay > 0) {
               await new Promise(resolve => setTimeout(resolve, this.config.executionDelay));
             }
           }
+          
+          // Calculate total execution time
+          const totalExecutionTime = Math.round(performance.now() - executionStartTime);
+          
+          // Track the workflow execution
+          await this.trackWorkflowExecution(workflow, {
+            status: 'success',
+            executionTimeMs: totalExecutionTime,
+            pageUrl: window.location.href,
+            deviceType: this.pageContext.deviceType,
+            triggerName: triggerNode.name,
+            actionsExecuted: executedActions
+          });
         }
       }
     }
@@ -892,6 +925,62 @@
      */
     async handleEvent(eventData) {
       await this.processWorkflows(eventData);
+    }
+
+    /**
+     * Track workflow execution to analytics endpoint
+     */
+    async trackWorkflowExecution(workflow, executionData) {
+      try {
+        // Don't track if no API endpoint configured
+        if (!this.config.apiEndpoint) {
+          console.warn('⚠️ No API endpoint configured for execution tracking');
+          return;
+        }
+
+        const trackingPayload = {
+          workflowId: workflow.id,
+          userId: workflow.user_id || null, // May be null for public workflows
+          status: executionData.status || 'success',
+          executionTimeMs: executionData.executionTimeMs,
+          pageUrl: executionData.pageUrl || window.location.href,
+          sessionId: this.generateSessionId(),
+          userAgent: navigator.userAgent,
+          deviceType: executionData.deviceType,
+          actions: executionData.actionsExecuted || []
+        };
+
+        console.log('📊 Tracking execution for workflow:', workflow.name, trackingPayload);
+
+        const response = await fetch(`${this.config.apiEndpoint}/api/track-execution`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(trackingPayload)
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          console.log('✅ Execution tracked successfully:', result.executionId);
+        } else {
+          const error = await response.text();
+          console.error('❌ Failed to track execution:', response.status, error);
+        }
+      } catch (error) {
+        console.error('❌ Error tracking workflow execution:', error);
+        // Don't throw - tracking failure shouldn't break workflow execution
+      }
+    }
+
+    /**
+     * Generate a simple session ID for tracking
+     */
+    generateSessionId() {
+      if (!this._sessionId) {
+        this._sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      }
+      return this._sessionId;
     }
   }
 
