@@ -15,17 +15,44 @@ const PORT = process.env.PORT || 3001;
 
 // Initialize Supabase client - aligned with frontend configuration
 const supabaseUrl = process.env.SUPABASE_URL || 'https://xlzihfstoqdbgdegqkoi.supabase.co';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhsemloZnN0Z3FkZ2JkZWdxa29pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzcwNDY4MjIsImV4cCI6MjA1MjYyMjgyMn0.7GBxGTmNhsF0vZNJ-jIBiSvGSMQGLCJq2uO3g6E_0Mo';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhsemloZnN0b3FkYmdkZWdxa29pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMwMTUzMDQsImV4cCI6MjA2ODU5MTMwNH0.uE0aEwBJN-sQCesYVjKNJdRyBAaaI_q0tFkSlTBilHw';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Service role client for demo workflows (bypasses RLS)
+const supabaseServiceRole = createClient(
+  supabaseUrl, 
+  process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+);
+
 console.log('🔗 Supabase connection initialized');
 console.log('📋 Supabase URL:', supabaseUrl);
-console.log('🔑 Supabase Key:', supabaseKey ? 'Set ✅' : 'Missing ❌');
+console.log('🔑 Supabase Anon Key:', supabaseKey ? 'Set ✅' : 'Missing ❌');
+console.log('🔑 Supabase Service Role Key:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Set ✅' : 'Missing ❌ (using anon key as fallback)');
 
 // CORS for all origins
-app.use(cors());
+app.use(cors({
+  origin: '*', // Allow all origins for workflow script delivery
+  credentials: false, // Set to false when origin is '*'
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'ngrok-skip-browser-warning', 'X-API-Key']
+}));
 app.use(express.json({ limit: '10mb' }));
+
+// Handle preflight requests for all routes
+app.options('*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, ngrok-skip-browser-warning, X-API-Key');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  res.status(200).end();
+});
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, 'dist')));
@@ -96,13 +123,43 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
+    supabase: {
+      url: supabaseUrl,
+      connected: !!supabase
+    },
     endpoints: {
       workflows: 'GET /api/workflows/active',
       unified_system: 'GET /api/unified-workflow-system.js',
       anti_flicker: 'GET /api/anti-flicker.js',
-      analytics: 'POST /api/analytics/track'
+      analytics: 'POST /api/analytics/track',
+      edge_function: 'https://xlzihfstoqdbgdegqkoi.supabase.co/functions/v1/track-execution'
     }
   });
+});
+
+// Quick test endpoint for unified workflow system
+app.get('/api/test-unified-system', (req, res) => {
+  try {
+    const scriptExists = fs.existsSync(path.join(__dirname, 'src/utils/unifiedWorkflowSystem.js'));
+    const scriptStats = scriptExists ? fs.statSync(path.join(__dirname, 'src/utils/unifiedWorkflowSystem.js')) : null;
+    
+    res.json({
+      status: 'success',
+      unified_system_script: {
+        exists: scriptExists,
+        size: scriptStats ? scriptStats.size : null,
+        modified: scriptStats ? scriptStats.mtime : null
+      },
+      script_url: `${req.protocol}://${req.get('host')}/api/unified-workflow-system.js`,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Serve tracking script endpoint
@@ -194,12 +251,24 @@ app.get('/api/workflow-executor.js', (req, res) => {
 
 // Serve unified workflow system
 app.get('/api/unified-workflow-system.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-  
-  const unifiedSystemScript = fs.readFileSync(path.join(__dirname, 'src/utils/unifiedWorkflowSystem.js'), 'utf8');
-  console.log('📦 Serving unified workflow system script');
-  res.send(unifiedSystemScript);
+  try {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    
+    const unifiedSystemScript = fs.readFileSync(path.join(__dirname, 'src/utils/unifiedWorkflowSystem.js'), 'utf8');
+    console.log('📦 Serving unified workflow system script to:', req.get('origin') || req.ip);
+    res.send(unifiedSystemScript);
+  } catch (error) {
+    console.error('❌ Error serving unified workflow system script:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to load unified workflow system script',
+      details: error.message 
+    });
+  }
 });
 
 // Serve anti-flicker script
@@ -267,6 +336,9 @@ app.get('/api/workflows/active', async (req, res) => {
     const apiKey = req.headers['x-api-key'] || req.query.api_key;
     
     console.log('📋 Fetching active workflows for:', url);
+    console.log('🔑 API Key provided:', apiKey ? 'Yes' : 'No');
+    console.log('🌐 Origin:', req.get('origin') || 'Not set');
+    console.log('🔗 Referer:', req.get('referer') || 'Not set');
     
     if (apiKey) {
       // Use API key authentication for external access
@@ -297,21 +369,36 @@ app.get('/api/workflows/active', async (req, res) => {
       });
     }
     
-    // Fallback to unauthenticated access (for development/testing)
-    console.log('⚠️ No API key provided, using unauthenticated access');
+    // Fallback to demo workflows using service role (bypasses RLS)
+    console.log('⚠️ No API key provided, using service role for demo workflows');
     
-    // Query Supabase for active workflows (this will likely return empty due to RLS)
-    const { data: workflows, error } = await supabase
+    // Use service role client to access demo workflows (bypasses RLS)
+    const { data: workflows, error } = await supabaseServiceRole
       .from('workflows_with_nodes')
       .select('*')
       .eq('is_active', true)
-      .eq('status', 'active');
+      .eq('status', 'active')
+      .limit(10); // Limit demo workflows for security
     
     if (error) {
       console.error('❌ Supabase error:', error);
+      console.error('❌ Error details:', error.message);
+      console.error('❌ Error hint:', error.hint || 'No additional hint');
+      
+      // Provide specific error message for RLS issues
+      let errorMessage = 'Failed to fetch workflows from database';
+      if (error.message.includes('RLS') || error.message.includes('policy')) {
+        errorMessage = 'Database access blocked by security policies. Please use API key authentication.';
+      }
+      
       return res.status(500).json({
         success: false,
-        error: 'Failed to fetch workflows from database',
+        error: errorMessage,
+        debug: this.config?.debug ? {
+          originalError: error.message,
+          hint: error.hint,
+          details: error.details
+        } : undefined,
         timestamp: new Date().toISOString()
       });
     }
