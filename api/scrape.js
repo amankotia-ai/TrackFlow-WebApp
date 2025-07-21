@@ -13,10 +13,14 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     return res.json({
-      message: 'TrackFlow Simple Scraping Proxy',
+      message: 'TrackFlow Web Scraping Proxy',
       status: 'online',
-      timestamp: new Date(),
-      usage: 'POST /api/scrape-simple with {"url": "https://example.com"}'
+      timestamp: new Date().toISOString(),
+      usage: 'POST with {"url": "https://example.com"}',
+      endpoints: {
+        scrape: 'POST /api/scrape',
+        health: 'GET /api/health'
+      }
     });
   }
 
@@ -42,24 +46,29 @@ export default async function handler(req, res) {
       targetUrl = `https://${url}`;
     }
 
-    // Fetch HTML from the URL
-    const response = await axios.get(targetUrl, {
-      timeout: 20000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Cache-Control': 'max-age=0'
-      },
-      maxRedirects: 10,
-      validateStatus: (status) => status < 400
-    });
+    // Fetch HTML from the URL with timeout
+    const response = await Promise.race([
+      axios.get(targetUrl, {
+        timeout: 15000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Cache-Control': 'max-age=0'
+        },
+        maxRedirects: 5,
+        validateStatus: (status) => status < 400
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout')), 20000)
+      )
+    ]);
 
     const html = response.data;
     const $ = cheerio.load(html);
@@ -71,12 +80,28 @@ export default async function handler(req, res) {
     // Remove noise elements
     $('script, style, noscript, iframe, embed, object, meta, link, head').remove();
 
+    // Strategy 1: Focus on semantic content areas
+    const semanticSelectors = [
+      'main', 'article', 'section', '.content', '.main', '.container', 
+      '.wrapper', '#content', '#main', '.page-content', '.post-content',
+      '.entry-content', '.article-content', '.text-content'
+    ];
+
+    let mainContentSelector = 'body';
+    for (const selector of semanticSelectors) {
+      const element = $(selector);
+      if (element.length > 0) {
+        mainContentSelector = selector;
+        break;
+      }
+    }
+
     // Extract text elements
-    $('body *').each((_, el) => {
+    $(mainContentSelector).find('*').each((_, el) => {
       const tag = el.type === 'tag' ? el.name : 'unknown';
       const text = $(el).text().trim();
 
-      if (text && text.length > 2) {
+      if (text && text.length > 2 && text.length < 1000) {
         const element = $(el);
         const attributes = {};
         
@@ -92,25 +117,27 @@ export default async function handler(req, res) {
         if (id) {
           selector = `#${id}`;
         } else if (className) {
-          const classes = className.split(' ').filter(c => c.trim()).join('.');
-          selector = `${tag}.${classes}`;
+          const classes = className.split(' ').filter(c => c.trim()).slice(0, 3).join('.');
+          if (classes) selector = `${tag}.${classes}`;
         }
 
         textElements.push({
           tag,
-          text,
+          text: text.substring(0, 500), // Limit text length
           selector,
           attributes: Object.keys(attributes).length > 0 ? attributes : undefined
         });
       }
     });
 
-    // Remove duplicates
-    const uniqueElements = textElements.filter((element, index, self) => {
-      const isDuplicate = self.findIndex(e => e.text === element.text) !== index;
-      const noiseTags = ['script', 'style', 'meta', 'link', 'head', 'html', 'body'];
-      return !isDuplicate && !noiseTags.includes(element.tag);
-    });
+    // Remove duplicates and limit results
+    const uniqueElements = textElements
+      .filter((element, index, self) => {
+        const isDuplicate = self.findIndex(e => e.text === element.text) !== index;
+        const noiseTags = ['script', 'style', 'meta', 'link', 'head', 'html', 'body'];
+        return !isDuplicate && !noiseTags.includes(element.tag);
+      })
+      .slice(0, 100); // Limit to 100 elements
 
     console.log(`✅ Extracted ${uniqueElements.length} unique elements`);
 
@@ -118,9 +145,10 @@ export default async function handler(req, res) {
       success: true,
       data: uniqueElements,
       url: targetUrl,
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
       debugInfo: {
         htmlLength: html.length,
+        mainContentSelector,
         totalElements: textElements.length,
         filteredElements: uniqueElements.length
       }
@@ -136,7 +164,7 @@ export default async function handler(req, res) {
       errorMessage = 'URL not found. Please check the URL and try again.';
     } else if (error.code === 'ECONNREFUSED') {
       errorMessage = 'Connection refused. Please check the URL and try again.';
-    } else if (error.code === 'ETIMEDOUT') {
+    } else if (error.code === 'ETIMEDOUT' || error.message === 'Request timeout') {
       errorMessage = 'Request timed out. Please try again.';
     } else if (error.message) {
       errorMessage = error.message;
@@ -146,7 +174,7 @@ export default async function handler(req, res) {
       success: false,
       error: errorMessage,
       url: req.body?.url,
-      timestamp: new Date()
+      timestamp: new Date().toISOString()
     });
   }
 } 

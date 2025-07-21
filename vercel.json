@@ -1,11 +1,10 @@
 {
-  "version": 2,
   "functions": {
-    "api/index.js": {
-      "maxDuration": 30
+    "api/scrape.js": {
+      "maxDuration": 25
     },
-    "api/scrape-simple.js": {
-      "maxDuration": 30
+    "api/health.js": {
+      "maxDuration": 10
     }
   }
 } 
