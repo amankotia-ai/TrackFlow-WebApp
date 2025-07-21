@@ -85,6 +85,12 @@
         // Set up event forwarding to workflow executor
         this.setupWorkflowEventForwarding();
         
+        // If a specific workflowId is configured, also set up legacy trigger checking
+        if (this.config.workflowId) {
+          console.log('🎯 Setting up legacy trigger checking for workflow:', this.config.workflowId);
+          this.setupLegacyWorkflowTriggers(this.config.workflowId);
+        }
+        
         console.log('🎯 Enhanced Element Tracker: Workflow system ready');
         
       } catch (error) {
@@ -613,6 +619,127 @@
       this.processBatch(true);
 
       console.log('🎯 Enhanced Element Tracker: Destroyed');
+    }
+
+    setupLegacyWorkflowTriggers(workflowId) {
+      // Override addEvent to also check triggers via API
+      const originalAddEvent = this.addEvent.bind(this);
+      
+      this.addEvent = async (event) => {
+        // Add to normal tracking queue
+        originalAddEvent(event);
+        
+        // Check workflow triggers via API for specific workflow
+        if (workflowId && workflowId !== 'element-tracking-demo' && workflowId !== 'test-workflow-123') {
+          try {
+            const triggerUrl = this.config.apiEndpoint.replace('/analytics/track', '/workflows/trigger-check');
+            const response = await fetch(triggerUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                event: this.prepareWorkflowEventData(event),
+                workflowId: workflowId
+              })
+            });
+            
+            if (response.ok) {
+              const result = await response.json();
+              
+              if (result.triggered && result.actions && result.actions.length > 0) {
+                console.log('🔄 Legacy Workflow Triggered:', result.actions);
+                // Execute actions using the legacy format
+                this.executeLegacyWorkflowActions(result.actions);
+              }
+            }
+          } catch (error) {
+            console.error('❌ Legacy workflow trigger check failed:', error);
+          }
+        }
+      };
+    }
+
+    executeLegacyWorkflowActions(actions) {
+      // Execute actions in the legacy format
+      actions.forEach(action => {
+        setTimeout(() => {
+          this.executeLegacyAction(action);
+        }, action.delay || 0);
+      });
+    }
+
+    executeLegacyAction(action) {
+      const elements = document.querySelectorAll(action.target);
+      
+      if (elements.length === 0) {
+        console.warn('⚠️ Action target not found:', action.target);
+        return;
+      }
+      
+      console.log(`🎬 Executing legacy action: ${action.type} on ${elements.length} element(s)`);
+      
+      switch (action.type) {
+        case 'replace_text':
+          elements.forEach(element => {
+            if (action.originalText && element.textContent.includes(action.originalText)) {
+              element.textContent = element.textContent.replace(action.originalText, action.newText);
+            } else if (action.newText) {
+              element.textContent = action.newText;
+            }
+          });
+          break;
+          
+        case 'hide_element':
+          elements.forEach(element => {
+            if (action.animation === 'fade') {
+              element.style.transition = 'opacity 0.3s ease';
+              element.style.opacity = '0';
+              setTimeout(() => element.style.display = 'none', 300);
+            } else {
+              element.style.display = 'none';
+            }
+          });
+          break;
+          
+        case 'show_element':
+          elements.forEach(element => {
+            element.style.display = 'block';
+            if (action.animation === 'fade') {
+              element.style.opacity = '0';
+              element.style.transition = 'opacity 0.3s ease';
+              setTimeout(() => element.style.opacity = '1', 10);
+            }
+          });
+          break;
+          
+        case 'modify_css':
+          elements.forEach(element => {
+            if (action.property && action.value) {
+              element.style[action.property] = action.value;
+            }
+          });
+          break;
+          
+        case 'add_class':
+          elements.forEach(element => {
+            if (action.className) {
+              element.classList.add(action.className);
+            }
+          });
+          break;
+          
+        case 'display_overlay':
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;color:white;';
+          overlay.innerHTML = action.content || '<div>Overlay Content</div>';
+          overlay.onclick = () => overlay.remove();
+          document.body.appendChild(overlay);
+          break;
+          
+        default:
+          console.warn('⚠️ Unknown legacy action type:', action.type);
+      }
     }
   }
 

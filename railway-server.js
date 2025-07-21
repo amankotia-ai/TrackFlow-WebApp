@@ -266,6 +266,24 @@ app.post('/api/workflows/trigger-check', async (req, res) => {
     const nodes = workflow.nodes || [];
     const connections = workflow.connections || [];
     
+    console.log('📊 Workflow data:', {
+      workflowId,
+      name: workflow.name,
+      nodeCount: nodes.length,
+      connectionCount: connections.length,
+      nodes: nodes.map(n => ({ id: n.id, type: n.type, name: n.name, config: n.config }))
+    });
+    
+    console.log('📨 Event data received:', {
+      type: event.type || event.eventType,
+      deviceType: event.deviceType,
+      utm: event.utm,
+      visitCount: event.visitCount,
+      timeOnPage: event.timeOnPage,
+      scrollPercentage: event.scrollPercentage,
+      elementSelector: event.elementSelector || event.element
+    });
+    
     // Find trigger nodes
     const triggerNodes = nodes.filter(node => node.type === 'trigger');
     let triggeredActions = [];
@@ -274,16 +292,21 @@ app.post('/api/workflows/trigger-check', async (req, res) => {
     for (const trigger of triggerNodes) {
       let isTriggered = false;
       
+      console.log(`🔍 Evaluating trigger: ${trigger.name}`, trigger.config);
+      
       // Evaluate trigger based on type
       switch (trigger.name) {
         case 'Device Type':
           isTriggered = event.deviceType === trigger.config.deviceType;
+          console.log(`  Device check: ${event.deviceType} === ${trigger.config.deviceType} = ${isTriggered}`);
           break;
           
         case 'UTM Parameters':
           if (event.utm) {
             const { parameter, value, operator } = trigger.config;
             const utmValue = event.utm[parameter];
+            
+            console.log(`  UTM check: ${parameter}=${utmValue}, operator=${operator}, expected=${value}`);
             
             switch (operator) {
               case 'equals':
@@ -302,27 +325,37 @@ app.post('/api/workflows/trigger-check', async (req, res) => {
           break;
           
         case 'Page Visits':
-          isTriggered = event.visitCount >= (trigger.config.visitCount || 3);
+          const visitThreshold = trigger.config.visitCount || 3;
+          isTriggered = event.visitCount >= visitThreshold;
+          console.log(`  Page visits check: ${event.visitCount} >= ${visitThreshold} = ${isTriggered}`);
           break;
           
         case 'Time on Page':
           const duration = trigger.config.duration || 30;
           const unit = trigger.config.unit || 'seconds';
           const thresholdMs = unit === 'minutes' ? duration * 60000 : duration * 1000;
-          isTriggered = event.timeOnPage >= thresholdMs;
+          const timeOnPageMs = event.timeOnPage * 1000; // Convert seconds to ms
+          isTriggered = timeOnPageMs >= thresholdMs;
+          console.log(`  Time on page check: ${event.timeOnPage}s >= ${duration}${unit} = ${isTriggered}`);
           break;
           
         case 'Scroll Depth':
-          isTriggered = event.scrollPercentage >= (trigger.config.percentage || 50);
+          const scrollThreshold = trigger.config.percentage || 50;
+          isTriggered = event.scrollPercentage >= scrollThreshold;
+          console.log(`  Scroll depth check: ${event.scrollPercentage}% >= ${scrollThreshold}% = ${isTriggered}`);
           break;
           
         case 'Element Click':
-          isTriggered = event.type === 'click' && 
-                       event.elementSelector === trigger.config.selector;
+          const eventType = event.type || event.eventType;
+          const elementSelector = event.elementSelector || event.element;
+          isTriggered = eventType === 'click' && elementSelector === trigger.config.selector;
+          console.log(`  Element click check: type=${eventType}, selector=${elementSelector} === ${trigger.config.selector} = ${isTriggered}`);
           break;
           
         case 'Exit Intent':
-          isTriggered = event.type === 'exit_intent';
+          const exitEventType = event.type || event.eventType;
+          isTriggered = exitEventType === 'exit_intent';
+          console.log(`  Exit intent check: ${exitEventType} === 'exit_intent' = ${isTriggered}`);
           break;
           
         default:
