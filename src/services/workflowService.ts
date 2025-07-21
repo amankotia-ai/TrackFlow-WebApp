@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { Workflow, WorkflowNode, WorkflowConnection } from '../types/workflow'
+import { ensureWorkflowConnections } from '../utils/integrationCodeGenerator';
 
 export interface WorkflowData {
   id: string
@@ -80,6 +81,8 @@ export class WorkflowService {
 
   // Save a workflow (create or update)
   static async saveWorkflow(workflow: Workflow): Promise<Workflow> {
+    // Ensure workflow has valid connections before saving
+    const workflowWithConnections = ensureWorkflowConnections(workflow);
     try {
       const { data: { user } } = await supabase.auth.getUser()
       
@@ -96,8 +99,8 @@ export class WorkflowService {
         p_is_active: workflow.isActive,
         p_status: workflow.status,
         p_target_url: workflow.targetUrl || '*',
-        p_nodes: workflow.nodes,
-        p_connections: workflow.connections
+        p_nodes: workflowWithConnections.nodes,
+        p_connections: workflowWithConnections.connections
       })
 
       if (error) {
@@ -107,7 +110,7 @@ export class WorkflowService {
 
       // Return the updated workflow with the new ID
       return {
-        ...workflow,
+        ...workflowWithConnections,
         id: data,
         updatedAt: new Date()
       }

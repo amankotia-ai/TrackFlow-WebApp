@@ -4,6 +4,7 @@
  */
 
 import { Workflow } from '../types/workflow';
+import type { WorkflowConnection } from '../types/workflow';
 
 export interface IntegrationCode {
   headCode: string;
@@ -24,20 +25,47 @@ export interface TrackingConfig {
 }
 
 /**
+ * Ensure workflow has a valid connections array linking trigger(s) to action(s)
+ */
+export function ensureWorkflowConnections(workflow: Workflow): Workflow {
+  if (Array.isArray(workflow.connections) && workflow.connections.length > 0) {
+    return workflow;
+  }
+  // Attempt to auto-generate connections: link each trigger to each action
+  const triggerNodes = workflow.nodes.filter(n => n.type === 'trigger');
+  const actionNodes = workflow.nodes.filter(n => n.type === 'action');
+  const connections: WorkflowConnection[] = [];
+  triggerNodes.forEach(trigger => {
+    actionNodes.forEach(action => {
+      connections.push({
+        id: `${trigger.id}-${action.id}`,
+        sourceNodeId: trigger.id,
+        targetNodeId: action.id,
+        sourceHandle: 'output',
+        targetHandle: 'input'
+      });
+    });
+  });
+  return { ...workflow, connections };
+}
+
+/**
  * Generate HTML integration code for a workflow
  */
 export function generateIntegrationCode(
   workflow: Workflow,
   config: Partial<TrackingConfig> = {}
 ): IntegrationCode {
+  // Ensure workflow has valid connections
+  const workflowWithConnections = ensureWorkflowConnections(workflow);
   // Detect if we should use ngrok URL (when config provides external URLs)
   const baseUrl = config.apiEndpoint && config.apiEndpoint.includes('ngrok') 
     ? config.apiEndpoint.replace('/api/analytics/track', '')
     : 'https://trackflow-webapp-production.up.railway.app';
 
   const trackingConfig: TrackingConfig = {
-    workflowId: workflow.id,
-    pageUrl: workflow.targetUrl || '',
+    workflowId: workflowWithConnections.id,
+    pageUrl: workflowWithConnections.targetUrl || '',
     apiEndpoint: `${baseUrl}/api/analytics/track`,
     trackingScriptUrl: `${baseUrl}/tracking-script.js`,
     debug: true,
@@ -46,25 +74,25 @@ export function generateIntegrationCode(
     ...config
   };
 
-  console.log('🎯 Integration: Generating code for workflow:', workflow.name);
+  console.log('🎯 Integration: Generating code for workflow:', workflowWithConnections.name);
 
   // Generate custom tracking selectors based on workflow nodes
-  const customSelectors = extractSelectorsFromWorkflow(workflow);
+  const customSelectors = extractSelectorsFromWorkflow(workflowWithConnections);
 
   // Head code - includes the tracking script and initialization
   const headCode = generateHeadCode(trackingConfig, customSelectors);
 
   // Body code - includes workflow-specific configurations
-  const bodyCode = generateBodyCode(trackingConfig, workflow);
+  const bodyCode = generateBodyCode(trackingConfig, workflowWithConnections);
 
   // Instructions for implementation
-  const instructions = generateInstructions(workflow, trackingConfig);
+  const instructions = generateInstructions(workflowWithConnections, trackingConfig);
 
   return {
     headCode,
     bodyCode,
     instructions,
-    workflowId: workflow.id,
+    workflowId: workflowWithConnections.id,
     pageUrl: trackingConfig.pageUrl
   };
 }
@@ -142,10 +170,12 @@ function generateBodyCode(config: TrackingConfig, workflow: Workflow): string {
     function tryInitWorkflow() {
       if (window.elementTracker && window.ELEMENT_TRACKING_CONFIG && window.ELEMENT_TRACKING_CONFIG.workflowId) {
         console.log('🎯 Workflow Integration: Initializing tracking for "${workflow.name}"');
+
+        // Setup workflow trigger checking FIRST
+        setupWorkflowTriggers('${workflow.id}');
+
         ${workflowTriggers}
         ${customTracking}
-        // Setup workflow trigger checking
-        setupWorkflowTriggers('${workflow.id}');
         console.log('✅ Workflow Integration: Setup complete for "${workflow.name}"');
       } else {
         setTimeout(tryInitWorkflow, 100); // Retry every 100ms
@@ -602,14 +632,16 @@ function getTrackingScript(trackingScriptUrl: string): string {
  * Generate a simple HTML test page for testing the integration
  */
 export function generateTestPage(workflow: Workflow): string {
-  const integration = generateIntegrationCode(workflow);
+  // Always ensure connections for test page as well
+  const workflowWithConnections = ensureWorkflowConnections(workflow);
+  const integration = generateIntegrationCode(workflowWithConnections);
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Test Page - ${workflow.name}</title>
+  <title>Test Page - ${workflowWithConnections.name}</title>
   
   ${integration.headCode}
   
@@ -627,9 +659,9 @@ export function generateTestPage(workflow: Workflow): string {
 </head>
 <body>
   <div class="container">
-    <h1>Workflow Test Page: ${workflow.name}</h1>
+    <h1>Workflow Test Page: ${workflowWithConnections.name}</h1>
     
-    <p>This page is for testing the "${workflow.name}" workflow integration.</p>
+    <p>This page is for testing the "${workflowWithConnections.name}" workflow integration.</p>
     
     <!-- Test Elements -->
     <section>
