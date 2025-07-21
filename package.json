@@ -8,7 +8,8 @@
     "dev:server": "node server-backup.js",
     "dev:all": "concurrently \"npm run dev:server\" \"npm run dev\"",
     "build": "vite build",
-    "start": "node api/index.js",
+    "start": "node railway-server.js",
+    "railway": "node railway-server.js",
     "vercel-build": "echo 'No build step required for serverless'",
     "lint": "eslint .",
     "preview": "vite preview"
