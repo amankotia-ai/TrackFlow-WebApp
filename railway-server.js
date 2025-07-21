@@ -14,8 +14,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Initialize Supabase client - aligned with frontend configuration
-const supabaseUrl = process.env.SUPABASE_URL || 'https://xlzihfstgqdgbdegqkoi.supabase.co';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhsemloZnN0b3FkYmdkZWdxa29pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMwMTUzMDQsImV4cCI6MjA2ODU5MTMwNH0.uE0aEwBJN-sQCesYVjKNJdRyBAaaI_q0tFkSlTBilHw';
+const supabaseUrl = process.env.SUPABASE_URL || 'https://xlzihfstoqdbgdegqkoi.supabase.co';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhsemloZnN0Z3FkZ2JkZWdxa29pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzcwNDY4MjIsImV4cCI6MjA1MjYyMjgyMn0.7GBxGTmNhsF0vZNJ-jIBiSvGSMQGLCJq2uO3g6E_0Mo';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
