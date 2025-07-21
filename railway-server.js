@@ -13,13 +13,15 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Initialize Supabase client
-const supabaseUrl = process.env.SUPABASE_URL || 'https://nmnjnofagtcalfnkltqp.supabase.co';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tbmpub2ZhZ3RjYWxmbmtsdHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY5NTE4MjIsImV4cCI6MjA1MjUyNzgyMn0.7GBxGTmNhsF0vZNJ-jIBiSvGSMQGLCJq2uO3g6E_0Mo';
+// Initialize Supabase client - aligned with frontend configuration
+const supabaseUrl = process.env.SUPABASE_URL || 'https://xlzihfstgqdgbdegqkoi.supabase.co';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhsemloZnN0b3FkYmdkZWdxa29pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMwMTUzMDQsImV4cCI6MjA2ODU5MTMwNH0.uE0aEwBJN-sQCesYVjKNJdRyBAaaI_q0tFkSlTBilHw';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 console.log('🔗 Supabase connection initialized');
+console.log('📋 Supabase URL:', supabaseUrl);
+console.log('🔑 Supabase Key:', supabaseKey ? 'Set ✅' : 'Missing ❌');
 
 // CORS for all origins
 app.use(cors());
