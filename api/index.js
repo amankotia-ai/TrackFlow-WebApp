@@ -10,15 +10,26 @@ import { createClient } from '@supabase/supabase-js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
+// Initialize Supabase client with error handling
+let supabase = null;
+try {
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
+    supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
+    );
+    console.log('🔗 Supabase client initialized successfully');
+  } else {
+    console.warn('⚠️ Supabase credentials missing - running without database');
+  }
+} catch (error) {
+  console.error('❌ Failed to initialize Supabase:', error.message);
+}
 
-console.log('🔗 Supabase client initialized:', {
+console.log('🔗 Environment check:', {
   url: process.env.SUPABASE_URL ? '✅ Set' : '❌ Missing',
-  key: process.env.SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing'
+  key: process.env.SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing',
+  nodeEnv: process.env.NODE_ENV || 'undefined'
 });
 
 const app = express();
@@ -265,35 +276,43 @@ app.post('/api/analytics/track', async (req, res) => {
 
     console.log(`📊 Analytics: Received batch of ${events.length} events`);
     
-    // Save to Supabase using production schema
+    // Save to Supabase using production schema (if available)
     if (events && events.length > 0) {
-      const { error } = await supabase
-        .from('analytics_events')
-        .insert(events.map(event => ({
-          session_id: event.sessionId,
-          event_type: event.eventType,
-          element_selector: event.elementSelector,
-          element_text: event.eventData?.elementText,
-          element_attributes: event.eventData?.elementAttributes || {},
-          page_url: event.pageContext?.pathname || event.pageContext?.url,
-          page_title: event.pageContext?.title,
-          referrer_url: event.pageContext?.referrer,
-          device_type: event.userContext?.deviceType,
-          browser_info: {
-            userAgent: event.userContext?.userAgent,
-            language: event.userContext?.language,
-            platform: event.userContext?.platform
-          },
-          user_agent: event.userContext?.userAgent,
-          viewport_size: event.userContext?.viewport,
-          screen_size: event.userContext?.screen,
-          event_data: event.eventData || {}
-        })));
-      
-      if (error) {
-        console.error('❌ Analytics save error:', error);
+      if (supabase) {
+        try {
+          const { error } = await supabase
+            .from('analytics_events')
+            .insert(events.map(event => ({
+              session_id: event.sessionId,
+              event_type: event.eventType,
+              element_selector: event.elementSelector,
+              element_text: event.eventData?.elementText,
+              element_attributes: event.eventData?.elementAttributes || {},
+              page_url: event.pageContext?.pathname || event.pageContext?.url,
+              page_title: event.pageContext?.title,
+              referrer_url: event.pageContext?.referrer,
+              device_type: event.userContext?.deviceType,
+              browser_info: {
+                userAgent: event.userContext?.userAgent,
+                language: event.userContext?.language,
+                platform: event.userContext?.platform
+              },
+              user_agent: event.userContext?.userAgent,
+              viewport_size: event.userContext?.viewport,
+              screen_size: event.userContext?.screen,
+              event_data: event.eventData || {}
+            })));
+          
+          if (error) {
+            console.error('❌ Analytics save error:', error);
+          } else {
+            console.log(`✅ Saved ${events.length} events to Supabase`);
+          }
+        } catch (error) {
+          console.error('❌ Analytics database error:', error);
+        }
       } else {
-        console.log(`✅ Saved ${events.length} events to Supabase`);
+        console.log(`📊 Analytics: Received ${events.length} events (Supabase not available)`);
       }
     }
 
