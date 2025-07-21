@@ -374,6 +374,7 @@
             
             // Find and execute connected actions
             const actions = this.getConnectedActions(workflow, trigger.id);
+            this.log(`🔗 Found ${actions.length} connected actions for trigger ${trigger.id}`, 'info', actions);
             
             // Store action selectors in our mapping for mutation observer
             actions.forEach(action => {
@@ -438,26 +439,43 @@
       const connections = workflow.connections || [];
       const nodes = workflow.nodes || [];
       
+      this.log(`🔍 Finding connected actions for trigger ${triggerNodeId}`, 'info', {
+        totalConnections: connections.length,
+        totalNodes: nodes.length,
+        connections: connections
+      });
+      
       const connectedActionIds = connections
         .filter(conn => conn.sourceNodeId === triggerNodeId)
         .map(conn => conn.targetNodeId);
+        
+      this.log(`🔗 Found ${connectedActionIds.length} connected action IDs:`, 'info', connectedActionIds);
       
-      return nodes.filter(node => 
+      const actionNodes = nodes.filter(node => 
         node.type === 'action' && connectedActionIds.includes(node.id)
       );
+      
+      this.log(`🎯 Returning ${actionNodes.length} action nodes:`, 'info', actionNodes);
+      
+      return actionNodes;
     }
 
     /**
      * Execute a list of actions
      */
     async executeActions(actions) {
-      if (!actions?.length) return;
+      if (!actions?.length) {
+        this.log('⚠️ No actions to execute', 'warning');
+        return;
+      }
       
-      this.log(`🎬 Executing ${actions.length} actions`);
+      this.log(`🎬 Executing ${actions.length} actions`, 'info', actions);
       
       // Execute content replacement actions immediately in parallel for better performance
       const contentActions = actions.filter(action => action.name === 'Replace Text');
       const otherActions = actions.filter(action => action.name !== 'Replace Text');
+      
+      this.log(`📊 Action breakdown: ${contentActions.length} content actions, ${otherActions.length} other actions`);
       
       // Execute content replacements in parallel for speed
       if (contentActions.length > 0) {
