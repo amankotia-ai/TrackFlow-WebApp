@@ -17,6 +17,10 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onNodeUpdate, o
   // Find the template for this node by matching name and type
   const template = nodeTemplates.find(t => t.name === node.name && t.type === node.type);
   
+  // Local state for staging changes before saving
+  const [localNode, setLocalNode] = useState<WorkflowNode>({ ...node });
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  
   // Debug logging
   console.log('Node:', node.name, node.type);
   console.log('Template found:', template ? template.name : 'Not found');
@@ -24,17 +28,45 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onNodeUpdate, o
 
   const handleConfigChange = (key: string, value: any) => {
     const updatedNode = {
-      ...node,
+      ...localNode,
       config: {
-        ...node.config,
+        ...localNode.config,
         [key]: value
       }
     };
-    onNodeUpdate(updatedNode);
+    setLocalNode(updatedNode);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleNodePropertyChange = (property: 'name' | 'description', value: string) => {
+    const updatedNode = {
+      ...localNode,
+      [property]: value
+    };
+    setLocalNode(updatedNode);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleSave = () => {
+    onNodeUpdate(localNode);
+    setHasUnsavedChanges(false);
+    onClose();
+  };
+
+  const handleCancel = () => {
+    if (hasUnsavedChanges) {
+      if (confirm('You have unsaved changes. Are you sure you want to cancel?')) {
+        setLocalNode({ ...node });
+        setHasUnsavedChanges(false);
+        onClose();
+      }
+    } else {
+      onClose();
+    }
   };
 
   const renderConfigField = (field: any) => {
-    const value = node.config[field.key] || field.default || '';
+    const value = localNode.config[field.key] || field.default || '';
 
     switch (field.type) {
       case 'text':
@@ -80,7 +112,7 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onNodeUpdate, o
                       handleConfigChange(field.key, selector);
                       
                       // For text replacement node, also update the originalText field
-                      if (node.type === 'action' && node.name === 'Replace Text' && field.key === 'selector') {
+                      if (localNode.type === 'action' && localNode.name === 'Replace Text' && field.key === 'selector') {
                         // Update the originalText field with the selected element's text
                         handleConfigChange('originalText', element.text);
                       }
@@ -220,10 +252,13 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onNodeUpdate, o
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-xl font-semibold text-secondary-900 tracking-tight">Configure Node</h3>
-            <p className="text-sm text-secondary-600 mt-1">Customize the behavior of this node</p>
+            <p className="text-sm text-secondary-600 mt-1">
+              Customize the behavior of this node
+              {hasUnsavedChanges && <span className="ml-2 text-orange-600 font-medium">• Unsaved changes</span>}
+            </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleCancel}
             className="p-2 hover:bg-secondary-100 rounded-lg text-secondary-500 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -241,8 +276,8 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onNodeUpdate, o
             </label>
             <input
               type="text"
-              value={node.name}
-              onChange={(e) => onNodeUpdate({ ...node, name: e.target.value })}
+              value={localNode.name}
+              onChange={(e) => handleNodePropertyChange('name', e.target.value)}
               className="w-full px-4 py-3 border border-secondary-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors bg-white"
             />
           </div>
@@ -253,8 +288,8 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onNodeUpdate, o
               Description
             </label>
             <textarea
-              value={node.description}
-              onChange={(e) => onNodeUpdate({ ...node, description: e.target.value })}
+              value={localNode.description}
+              onChange={(e) => handleNodePropertyChange('description', e.target.value)}
               rows={3}
               className="w-full px-4 py-3 border border-secondary-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors bg-white resize-none"
             />
@@ -267,11 +302,11 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onNodeUpdate, o
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-secondary-700">Type:</span>
-                <span className="text-secondary-600 capitalize px-2 py-1 bg-white rounded-md border border-secondary-200">{node.type}</span>
+                <span className="text-secondary-600 capitalize px-2 py-1 bg-white rounded-md border border-secondary-200">{localNode.type}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="font-medium text-secondary-700">Category:</span>
-                <span className="text-secondary-600 px-2 py-1 bg-white rounded-md border border-secondary-200">{node.category}</span>
+                <span className="text-secondary-600 px-2 py-1 bg-white rounded-md border border-secondary-200">{localNode.category}</span>
               </div>
             </div>
           </div>
@@ -292,7 +327,7 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onNodeUpdate, o
                   {template ? 'No configuration fields available for this node.' : 'Template not found for this node.'}
                 </p>
                 <p className="text-xs text-yellow-600 mt-1">
-                  Node: {node.name} ({node.type})
+                  Node: {localNode.name} ({localNode.type})
                 </p>
               </div>
             </div>
@@ -304,13 +339,18 @@ const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onNodeUpdate, o
       <div className="px-6 py-4 border-t border-secondary-200 bg-white/80 backdrop-blur-sm">
         <div className="flex items-center space-x-3">
           <button
-            onClick={onClose}
-            className="flex-1 flex items-center justify-center space-x-2 bg-primary-600 text-white py-3 px-4 rounded-lg hover:bg-primary-700 transition-colors font-medium shadow-sm"
+            onClick={handleSave}
+            className={`flex-1 flex items-center justify-center space-x-2 py-3 px-4 rounded-lg font-medium shadow-sm transition-colors ${
+              hasUnsavedChanges
+                ? 'bg-primary-600 text-white hover:bg-primary-700'
+                : 'bg-secondary-300 text-secondary-500 cursor-not-allowed'
+            }`}
+            disabled={!hasUnsavedChanges}
           >
-            <span>Apply Changes</span>
+            <span>Save Changes</span>
           </button>
           <button
-            onClick={onClose}
+            onClick={handleCancel}
             className="px-4 py-3 text-secondary-600 hover:text-secondary-900 transition-colors font-medium"
           >
             Cancel

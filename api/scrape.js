@@ -130,14 +130,13 @@ export default async function handler(req, res) {
       }
     });
 
-    // Remove duplicates and limit results
+    // Remove duplicates - no limit on results
     const uniqueElements = textElements
       .filter((element, index, self) => {
         const isDuplicate = self.findIndex(e => e.text === element.text) !== index;
         const noiseTags = ['script', 'style', 'meta', 'link', 'head', 'html', 'body'];
         return !isDuplicate && !noiseTags.includes(element.tag);
-      })
-      .slice(0, 100); // Limit to 100 elements
+      });
 
     console.log(`✅ Extracted ${uniqueElements.length} unique elements`);
 

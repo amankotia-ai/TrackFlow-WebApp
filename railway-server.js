@@ -129,10 +129,9 @@ app.post('/api/scrape', async (req, res) => {
       }
     });
 
-    // Remove duplicates
+    // Remove duplicates - no limit on results
     const uniqueElements = elements
-      .filter((el, i, arr) => arr.findIndex(e => e.text === el.text) === i)
-      .slice(0, 50);
+      .filter((el, i, arr) => arr.findIndex(e => e.text === el.text) === i);
 
     console.log(`✅ Extracted ${uniqueElements.length} elements`);
 
