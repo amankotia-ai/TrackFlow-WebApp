@@ -47,6 +47,14 @@ const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
   const { isScraping, scrapingResult, scrapeUrl, clearResult } = useWebScraper();
   const [showScrapingResults, setShowScrapingResults] = useState(false);
 
+  // Sync internal state with workflow prop when it changes
+  useEffect(() => {
+    setCurrentWorkflow(workflow);
+    setTempName(workflow.name);
+    setUrl(workflow.targetUrl || '');
+    setSelectedNode(null);
+  }, [workflow]);
+
   useEffect(() => {
     setUrl(workflow.targetUrl || '');
   }, [workflow.targetUrl]);
