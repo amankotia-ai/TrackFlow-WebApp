@@ -26,9 +26,9 @@
       this.contentHidden = false;
       this.initialized = false;
       
-      // Auto-hide content if enabled
+      // Auto-hide content if enabled - but wait for body to be ready
       if (this.config.hideContentDuringInit) {
-        this.hideContent();
+        this.safeHideContent();
       }
       
       this.log('🎯 Unified Workflow System: Starting...');
@@ -522,8 +522,24 @@
       });
     }
 
+    safeHideContent() {
+      // Wait for body to be available
+      if (!document.body) {
+        // If body not ready, wait a bit and try again
+        setTimeout(() => this.safeHideContent(), 10);
+        return;
+      }
+      this.hideContent();
+    }
+
     hideContent() {
       if (this.contentHidden) return;
+      
+      // Check if document.body exists
+      if (!document.body) {
+        this.log('⚠️ Document body not ready, skipping content hide', 'warning');
+        return;
+      }
       
       document.body.style.visibility = 'hidden';
       this.contentHidden = true;
@@ -534,6 +550,13 @@
 
     showContent() {
       if (!this.contentHidden) return;
+      
+      // Check if document.body exists
+      if (!document.body) {
+        this.log('⚠️ Document body not ready, skipping content show', 'warning');
+        this.contentHidden = false; // Reset the flag
+        return;
+      }
       
       document.body.style.visibility = 'visible';
       this.contentHidden = false;
