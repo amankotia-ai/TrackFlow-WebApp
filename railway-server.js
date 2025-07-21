@@ -91,7 +91,7 @@ app.get('/api/health', (req, res) => {
     endpoints: {
       workflows: 'GET /api/workflows/active',
       unified_system: 'GET /api/unified-workflow-system.js',
-    anti_flicker: 'GET /api/anti-flicker.js',
+      anti_flicker: 'GET /api/anti-flicker.js',
       analytics: 'POST /api/analytics/track'
     }
   });

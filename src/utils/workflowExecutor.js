@@ -952,7 +952,7 @@
 
         console.log('📊 Tracking execution for workflow:', workflow.name, trackingPayload);
 
-        const response = await fetch(`${this.config.apiEndpoint}/api/track-execution`, {
+        const response = await fetch(`https://xlzihfstgqdgbdegqkoi.supabase.co/functions/v1/track-execution`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

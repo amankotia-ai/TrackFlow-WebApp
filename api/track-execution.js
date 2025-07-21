@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase client with service role key for direct database access
-const supabaseUrl = process.env.SUPABASE_URL || 'https://xlzihfstgqdgbdegqkoi.supabase.co';
+const supabaseUrl = process.env.SUPABASE_URL || 'https://nmnjnofagtcalfnkltqp.supabase.co';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseServiceKey) {
