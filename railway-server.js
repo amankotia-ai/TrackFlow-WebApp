@@ -240,10 +240,43 @@ app.post('/api/analytics/track', async (req, res) => {
 app.get('/api/workflows/active', async (req, res) => {
   try {
     const { url } = req.query;
+    const apiKey = req.headers['x-api-key'] || req.query.api_key;
     
     console.log('📋 Fetching active workflows for:', url);
     
-    // Query Supabase for active workflows
+    if (apiKey) {
+      // Use API key authentication for external access
+      console.log('🔑 Using API key authentication');
+      
+      const { data: workflows, error } = await supabase.rpc('get_active_workflows_for_url', {
+        p_api_key: apiKey,
+        p_url: url || ''
+      });
+      
+      if (error) {
+        console.error('❌ API key authentication failed:', error);
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid or expired API key',
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      console.log(`✅ Found ${workflows.length} workflows via API key`);
+      
+      return res.json({
+        success: true,
+        workflows: workflows,
+        count: workflows.length,
+        url,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Fallback to unauthenticated access (for development/testing)
+    console.log('⚠️ No API key provided, using unauthenticated access');
+    
+    // Query Supabase for active workflows (this will likely return empty due to RLS)
     const { data: workflows, error } = await supabase
       .from('workflows_with_nodes')
       .select('*')
@@ -367,6 +400,113 @@ app.get('/api/workflows/active', async (req, res) => {
       success: false, 
       error: 'Failed to fetch workflows',
       timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Test endpoint to create a demo workflow (for debugging only)
+app.post('/api/workflows/create-demo', async (req, res) => {
+  try {
+    console.log('🧪 Creating demo workflow for testing...');
+    
+    // First, create a test user (or use existing)
+    const testUserId = '00000000-0000-0000-0000-000000000000'; // Dummy UUID for testing
+    
+    const demoWorkflow = {
+      id: 'demo-workflow-' + Date.now(),
+      user_id: testUserId,
+      name: 'Demo Mobile Workflow',
+      description: 'Test workflow for mobile devices',
+      is_active: true,
+      status: 'active',
+      target_url: '*', // Works on all pages
+      executions: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    const demoNodes = [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        category: 'Device & Browser',
+        name: 'Device Type',
+        description: 'Trigger for mobile devices',
+        icon: 'Smartphone',
+        position: { x: 100, y: 50 },
+        config: { deviceType: 'mobile' },
+        inputs: [],
+        outputs: ['output']
+      },
+      {
+        id: 'action-1',
+        type: 'action',
+        category: 'Content Modification',
+        name: 'Replace Text',
+        description: 'Replace text for mobile users',
+        icon: 'Type',
+        position: { x: 400, y: 50 },
+        config: {
+          selector: 'h1, .hero-title, .main-title',
+          newText: 'Mobile-Optimized Title!'
+        },
+        inputs: ['input'],
+        outputs: []
+      }
+    ];
+    
+    const demoConnections = [
+      {
+        id: 'conn-1',
+        sourceNodeId: 'trigger-1',
+        targetNodeId: 'action-1',
+        sourceHandle: 'output',
+        targetHandle: 'input'
+      }
+    ];
+    
+    // Insert workflow using the save_workflow_complete function
+    const { data: workflowId, error } = await supabase.rpc('save_workflow_complete', {
+      p_workflow_id: null, // Create new
+      p_user_id: testUserId,
+      p_name: demoWorkflow.name,
+      p_description: demoWorkflow.description,
+      p_is_active: demoWorkflow.is_active,
+      p_status: demoWorkflow.status,
+      p_target_url: demoWorkflow.target_url,
+      p_nodes: demoNodes,
+      p_connections: demoConnections
+    });
+    
+    if (error) {
+      console.error('❌ Failed to create demo workflow:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create demo workflow',
+        details: error.message
+      });
+    }
+    
+    console.log('✅ Demo workflow created with ID:', workflowId);
+    
+    res.json({
+      success: true,
+      workflowId: workflowId,
+      message: 'Demo workflow created successfully',
+      workflow: {
+        ...demoWorkflow,
+        id: workflowId,
+        nodes: demoNodes,
+        connections: demoConnections
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error creating demo workflow:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create demo workflow',
+      details: error.message
     });
   }
 });
