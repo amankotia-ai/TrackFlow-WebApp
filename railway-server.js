@@ -91,6 +91,7 @@ app.get('/api/health', (req, res) => {
     endpoints: {
       workflows: 'GET /api/workflows/active',
       unified_system: 'GET /api/unified-workflow-system.js',
+    anti_flicker: 'GET /api/anti-flicker.js',
       analytics: 'POST /api/analytics/track'
     }
   });
@@ -191,6 +192,21 @@ app.get('/api/unified-workflow-system.js', (req, res) => {
   const unifiedSystemScript = fs.readFileSync(path.join(__dirname, 'src/utils/unifiedWorkflowSystem.js'), 'utf8');
   console.log('📦 Serving unified workflow system script');
   res.send(unifiedSystemScript);
+});
+
+// Serve anti-flicker script
+app.get('/api/anti-flicker.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+  
+  try {
+    const antiFlickerScript = fs.readFileSync(path.join(__dirname, 'src/utils/antiFlickerScript.js'), 'utf8');
+    console.log('📦 Serving anti-flicker script');
+    res.send(antiFlickerScript);
+  } catch (error) {
+    console.error('❌ Anti-flicker script not found:', error.message);
+    res.status(404).send('// Anti-flicker script not found');
+  }
 });
 
 // Legacy endpoint - deprecated, use unified system instead

@@ -97,9 +97,25 @@ export function generateIntegrationCode(
  */
 function generateUnifiedHeadCode(config: TrackingConfig): string {
   const scriptUrl = config.trackingScriptUrl || 'https://trackflow-webapp-production.up.railway.app/api/unified-workflow-system.js';
+  const antiFlickerUrl = 'https://trackflow-webapp-production.up.railway.app/api/anti-flicker.js';
+  
+  const antiFlickerConfig = `
+  // Configure anti-flicker settings
+  window.unifiedWorkflowConfig = {
+    maxHideTime: 5000,
+    showLoadingIndicator: true,
+    debug: ${config.debug || false},
+    hideMethod: 'opacity'
+  };`;
   
   if (config.apiKey) {
-    return `<!-- Unified Workflow System with API Key - Add to <head> section -->
+    return `<!-- Unified Workflow System with Anti-Flicker - Add to <head> section -->
+<script>
+  ${antiFlickerConfig}
+</script>
+<!-- Anti-flicker script (loads first to prevent FOOC) -->
+<script src="${antiFlickerUrl}"></script>
+<!-- Main workflow system -->
 <script src="${scriptUrl}"></script>
 <script>
   // Configure API key for authenticated access
@@ -111,7 +127,13 @@ function generateUnifiedHeadCode(config: TrackingConfig): string {
 </script>`;
   }
   
-  return `<!-- Unified Workflow System - Add to <head> section -->
+  return `<!-- Unified Workflow System with Anti-Flicker - Add to <head> section -->
+<script>
+  ${antiFlickerConfig}
+</script>
+<!-- Anti-flicker script (loads first to prevent FOOC) -->
+<script src="${antiFlickerUrl}"></script>
+<!-- Main workflow system -->
 <script src="${scriptUrl}"></script>`;
 }
 

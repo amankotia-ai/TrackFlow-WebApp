@@ -16,7 +16,10 @@
         retryAttempts: 3,
         executionDelay: 100,
         hideContentDuringInit: true,
-        maxInitTime: 3000,
+        maxInitTime: 5000, // Increased timeout
+        elementWaitTimeout: 10000, // How long to wait for elements
+        showLoadingIndicator: true, // Show loading spinner
+        progressive: true, // Show content progressively as modifications complete
         ...config
       };
       
@@ -26,9 +29,12 @@
       this.userContext = this.getUserContext();
       this.contentHidden = false;
       this.initialized = false;
+      this.loadingIndicatorShown = false;
+      this.elementsToWaitFor = new Set(); // Track elements we're waiting for
+      this.completedModifications = new Set(); // Track completed modifications
       
-      // Auto-hide content if enabled - but wait for body to be ready
-      if (this.config.hideContentDuringInit) {
+      // Auto-hide content if enabled and anti-flicker script hasn't already done it
+      if (this.config.hideContentDuringInit && !window.unifiedWorkflowAntiFlicker?.isContentHidden()) {
         this.safeHideContent();
       }
       
@@ -56,7 +62,10 @@
         // Set up event listeners for dynamic triggers
         this.setupEventListeners();
         
-        // Show content after initialization
+        // Wait for all pending element operations to complete
+        await this.waitForAllModifications();
+        
+        // Show content after all modifications are complete
         this.showContent();
         
         this.initialized = true;
@@ -296,7 +305,7 @@
       
       // Prevent duplicate executions
       if (this.executedActions.has(actionKey)) {
-        return;
+        return { success: false, reason: 'already_executed' };
       }
       this.executedActions.add(actionKey);
       
@@ -304,96 +313,151 @@
       this.log(`⚡ Executing: ${name}`, config);
 
       try {
-        await this.waitForElement(config.selector);
+        let result = { success: false };
         
         switch (name) {
           case 'Replace Text':
-            await this.replaceText(config);
+            result = await this.replaceText(config);
             break;
             
           case 'Hide Element':
-            await this.hideElement(config);
+            result = await this.hideElement(config);
             break;
             
           case 'Show Element':
-            await this.showElement(config);
+            result = await this.showElement(config);
             break;
             
           case 'Modify CSS':
-            await this.modifyCSS(config);
+            result = await this.modifyCSS(config);
             break;
             
           case 'Add Class':
-            await this.addClass(config);
+            result = await this.addClass(config);
             break;
             
           case 'Remove Class':
-            await this.removeClass(config);
+            result = await this.removeClass(config);
             break;
             
           case 'Display Overlay':
-            await this.displayOverlay(config);
+            result = await this.displayOverlay(config);
             break;
             
           case 'Redirect Page':
-            await this.redirectPage(config);
+            result = await this.redirectPage(config);
             break;
             
           default:
             this.log(`⚠️ Unknown action: ${name}`, 'warning');
+            result = { success: false, error: `Unknown action: ${name}` };
         }
+        
+        return result;
         
       } catch (error) {
         this.log(`❌ Action failed: ${name} - ${error.message}`, 'error');
+        return { success: false, error: error.message };
       }
     }
 
     // Action implementations
     async replaceText(config) {
-      const elements = document.querySelectorAll(config.selector);
-      elements.forEach(element => {
-        if (config.originalText && element.textContent.includes(config.originalText)) {
-          element.textContent = element.textContent.replace(config.originalText, config.newText);
-        } else {
-          element.textContent = config.newText;
-        }
-      });
-      this.log(`✅ Text replaced in ${elements.length} elements`);
+      try {
+        // Wait for elements to be available
+        await this.waitForElement(config.selector);
+        
+        const elements = document.querySelectorAll(config.selector);
+        let modifiedCount = 0;
+        
+        elements.forEach(element => {
+          if (config.originalText && element.textContent.includes(config.originalText)) {
+            element.textContent = element.textContent.replace(config.originalText, config.newText);
+            modifiedCount++;
+          } else if (config.newText) {
+            element.textContent = config.newText;
+            modifiedCount++;
+          }
+        });
+        
+        // Mark this modification as complete
+        this.completedModifications.add(`replaceText:${config.selector}`);
+        this.log(`✅ Text replaced in ${modifiedCount}/${elements.length} elements (${config.selector})`);
+        
+        return { success: true, modified: modifiedCount, total: elements.length };
+        
+      } catch (error) {
+        this.log(`❌ Text replacement failed for ${config.selector}: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+      }
     }
 
     async hideElement(config) {
-      const elements = document.querySelectorAll(config.selector);
-      elements.forEach(element => {
-        if (config.animation === 'fade') {
-          element.style.transition = 'opacity 0.3s ease';
-          element.style.opacity = '0';
-          setTimeout(() => element.style.display = 'none', 300);
-        } else {
-          element.style.display = 'none';
-        }
-      });
-      this.log(`✅ Hidden ${elements.length} elements`);
+      try {
+        await this.waitForElement(config.selector);
+        
+        const elements = document.querySelectorAll(config.selector);
+        elements.forEach(element => {
+          if (config.animation === 'fade') {
+            element.style.transition = 'opacity 0.3s ease';
+            element.style.opacity = '0';
+            setTimeout(() => element.style.display = 'none', 300);
+          } else {
+            element.style.display = 'none';
+          }
+        });
+        
+        this.completedModifications.add(`hideElement:${config.selector}`);
+        this.log(`✅ Hidden ${elements.length} elements (${config.selector})`);
+        return { success: true, hidden: elements.length };
+        
+      } catch (error) {
+        this.log(`❌ Hide element failed for ${config.selector}: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+      }
     }
 
     async showElement(config) {
-      const elements = document.querySelectorAll(config.selector);
-      elements.forEach(element => {
-        element.style.display = 'block';
-        if (config.animation === 'fade') {
-          element.style.opacity = '0';
-          element.style.transition = 'opacity 0.3s ease';
-          setTimeout(() => element.style.opacity = '1', 10);
-        }
-      });
-      this.log(`✅ Shown ${elements.length} elements`);
+      try {
+        await this.waitForElement(config.selector);
+        
+        const elements = document.querySelectorAll(config.selector);
+        elements.forEach(element => {
+          element.style.display = 'block';
+          if (config.animation === 'fade') {
+            element.style.opacity = '0';
+            element.style.transition = 'opacity 0.3s ease';
+            setTimeout(() => element.style.opacity = '1', 10);
+          }
+        });
+        
+        this.completedModifications.add(`showElement:${config.selector}`);
+        this.log(`✅ Shown ${elements.length} elements (${config.selector})`);
+        return { success: true, shown: elements.length };
+        
+      } catch (error) {
+        this.log(`❌ Show element failed for ${config.selector}: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+      }
     }
 
     async modifyCSS(config) {
-      const elements = document.querySelectorAll(config.selector);
-      elements.forEach(element => {
-        element.style[config.property] = config.value;
-      });
-      this.log(`✅ Modified CSS for ${elements.length} elements`);
+      try {
+        await this.waitForElement(config.selector);
+        
+        const elements = document.querySelectorAll(config.selector);
+        elements.forEach(element => {
+          element.style[config.property] = config.value;
+        });
+        
+        this.completedModifications.add(`modifyCSS:${config.selector}`);
+        this.log(`✅ Modified CSS for ${elements.length} elements (${config.selector})`);
+        return { success: true, modified: elements.length };
+        
+      } catch (error) {
+        this.log(`❌ CSS modification failed for ${config.selector}: ${error.message}`, 'error');
+        return { success: false, error: error.message };
+      }
     }
 
     async addClass(config) {
@@ -505,28 +569,62 @@
       return element.tagName.toLowerCase();
     }
 
-    async waitForElement(selector, timeout = 5000) {
+    async waitForElement(selector, timeout = null) {
+      const actualTimeout = timeout || this.config.elementWaitTimeout;
+      
       return new Promise((resolve, reject) => {
+        // Add to waiting set for tracking
+        this.elementsToWaitFor.add(selector);
+        
+        // Check if element already exists
         const element = document.querySelector(selector);
         if (element) {
+          this.elementsToWaitFor.delete(selector);
+          this.log(`✅ Element found immediately: ${selector}`);
           resolve(element);
           return;
         }
+
+        this.log(`⏳ Waiting for element: ${selector} (timeout: ${actualTimeout}ms)`);
 
         const observer = new MutationObserver(() => {
           const element = document.querySelector(selector);
           if (element) {
             observer.disconnect();
+            this.elementsToWaitFor.delete(selector);
+            this.log(`✅ Element appeared: ${selector}`);
             resolve(element);
           }
         });
 
-        observer.observe(document.body, { childList: true, subtree: true });
+        // Observe with more comprehensive options
+        const observeOptions = { 
+          childList: true, 
+          subtree: true, 
+          attributes: true, 
+          attributeOldValue: true 
+        };
+
+        // Start observing - handle case where body might not exist yet
+        if (document.body) {
+          observer.observe(document.body, observeOptions);
+        } else {
+          // If body doesn't exist, wait for it
+          const bodyObserver = new MutationObserver(() => {
+            if (document.body) {
+              bodyObserver.disconnect();
+              observer.observe(document.body, observeOptions);
+            }
+          });
+          bodyObserver.observe(document.documentElement, { childList: true });
+        }
         
         setTimeout(() => {
           observer.disconnect();
-          reject(new Error(`Element ${selector} not found within ${timeout}ms`));
-        }, timeout);
+          this.elementsToWaitFor.delete(selector);
+          this.log(`❌ Element timeout: ${selector} not found within ${actualTimeout}ms`, 'error');
+          reject(new Error(`Element ${selector} not found within ${actualTimeout}ms`));
+        }, actualTimeout);
       });
     }
 
@@ -549,14 +647,35 @@
         return;
       }
       
+      // Apply comprehensive hiding to prevent FOOC
       document.body.style.visibility = 'hidden';
+      document.body.style.opacity = '0';
+      document.body.style.transition = 'opacity 0.3s ease';
       this.contentHidden = true;
       
+      // Show loading indicator if enabled
+      if (this.config.showLoadingIndicator) {
+        this.showLoadingIndicator();
+      }
+      
+      this.log('🙈 Content hidden during workflow initialization');
+      
       // Safety timeout to show content regardless
-      setTimeout(() => this.showContent(), this.config.maxInitTime);
+      setTimeout(() => {
+        this.log('⏰ Safety timeout reached, showing content', 'warning');
+        this.showContent();
+      }, this.config.maxInitTime);
     }
 
     showContent() {
+      // Use anti-flicker script if available, otherwise use built-in method
+      if (window.unifiedWorkflowAntiFlicker) {
+        window.unifiedWorkflowAntiFlicker.showContent();
+        this.contentHidden = false;
+        this.log('👀 Content revealed via anti-flicker script');
+        return;
+      }
+      
       if (!this.contentHidden) return;
       
       // Check if document.body exists
@@ -566,8 +685,87 @@
         return;
       }
       
+      // Hide loading indicator first
+      this.hideLoadingIndicator();
+      
+      // Progressive content reveal with smooth transition
       document.body.style.visibility = 'visible';
+      document.body.style.opacity = '1';
+      
       this.contentHidden = false;
+      this.log('👀 Content revealed after workflow processing');
+    }
+
+    async waitForAllModifications(timeout = 5000) {
+      this.log('⏳ Waiting for all modifications to complete...');
+      
+      const startTime = Date.now();
+      
+      while (this.elementsToWaitFor.size > 0 && (Date.now() - startTime) < timeout) {
+        this.log(`⏳ Still waiting for ${this.elementsToWaitFor.size} elements: ${Array.from(this.elementsToWaitFor).join(', ')}`);
+        await this.delay(100);
+      }
+      
+      if (this.elementsToWaitFor.size > 0) {
+        this.log(`⚠️ Timeout: ${this.elementsToWaitFor.size} elements still pending`, 'warning');
+      } else {
+        this.log('✅ All modifications completed successfully');
+      }
+    }
+
+    showLoadingIndicator() {
+      if (this.loadingIndicatorShown || !this.config.showLoadingIndicator) return;
+      
+      const indicator = document.createElement('div');
+      indicator.id = 'unified-workflow-loading';
+      indicator.innerHTML = `
+        <div style="
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 999999;
+          background: rgba(255, 255, 255, 0.95);
+          border-radius: 12px;
+          padding: 20px 30px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+          font-size: 14px;
+          color: #333;
+        ">
+          <div style="
+            width: 20px;
+            height: 20px;
+            border: 2px solid #e3e3e3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+          "></div>
+          <span>Personalizing content...</span>
+        </div>
+        <style>
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        </style>
+      `;
+      
+      document.body.appendChild(indicator);
+      this.loadingIndicatorShown = true;
+      this.log('🔄 Loading indicator shown');
+    }
+
+    hideLoadingIndicator() {
+      const indicator = document.getElementById('unified-workflow-loading');
+      if (indicator) {
+        indicator.remove();
+        this.loadingIndicatorShown = false;
+        this.log('🔄 Loading indicator hidden');
+      }
     }
 
     delay(ms) {
