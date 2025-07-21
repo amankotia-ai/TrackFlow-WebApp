@@ -640,6 +640,8 @@
         const elements = document.querySelectorAll(selector);
         if (!elements?.length) {
           this.log(`No elements found for selector: ${selector}`, 'warning');
+          // Add explicit browser console warning:
+          console.warn(`No elements found for selector: ${selector}`);
           return false;
         }
         
