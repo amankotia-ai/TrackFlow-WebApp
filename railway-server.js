@@ -28,6 +28,12 @@ app.use(express.json({ limit: '10mb' }));
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, 'dist')));
 
+// Serve test HTML files from root directory
+app.use(express.static(__dirname, { 
+  extensions: ['html'],
+  index: false 
+}));
+
 // Root endpoint with documentation
 app.get('/', (req, res) => {
   res.send(`
