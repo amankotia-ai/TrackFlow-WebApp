@@ -9,7 +9,7 @@
   class WorkflowExecutor {
     constructor(config = {}) {
       this.config = {
-        apiEndpoint: 'http://localhost:3001',
+        apiEndpoint: 'https://trackflow-webapp-production.up.railway.app',
         debug: true,
         retryAttempts: 3,
         executionDelay: 100,

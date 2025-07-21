@@ -33,7 +33,7 @@ export function generateIntegrationCode(
   // Detect if we should use ngrok URL (when config provides external URLs)
   const baseUrl = config.apiEndpoint && config.apiEndpoint.includes('ngrok') 
     ? config.apiEndpoint.replace('/api/analytics/track', '')
-    : 'http://localhost:3001';
+    : 'https://trackflow-webapp-production.up.railway.app';
 
   const trackingConfig: TrackingConfig = {
     workflowId: workflow.id,
@@ -107,7 +107,7 @@ function extractSelectorsFromWorkflow(workflow: Workflow): string[] {
  * Generate the <head> section code
  */
 function generateHeadCode(config: TrackingConfig, customSelectors: string[]): string {
-  const trackingScript = getTrackingScript(config.trackingScriptUrl || 'http://localhost:3001/tracking-script.js');
+  const trackingScript = getTrackingScript(config.trackingScriptUrl || 'https://trackflow-webapp-production.up.railway.app/tracking-script.js');
   
   return `<!-- Element Tracking Integration - Add to <head> section -->
 <script>
@@ -174,7 +174,7 @@ function generateBodyCode(config: TrackingConfig, workflow: Workflow): string {
   // Check if an event should trigger workflow actions
   async function checkWorkflowTrigger(event, workflowId) {
     try {
-      const response = await fetch('${config.apiEndpoint?.replace('/analytics/track', '/workflows/trigger-check') || 'http://localhost:3001/api/workflows/trigger-check'}', {
+      const response = await fetch('${config.apiEndpoint?.replace('/analytics/track', '/workflows/trigger-check') || 'https://trackflow-webapp-production.up.railway.app/api/workflows/trigger-check'}', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -554,7 +554,7 @@ ${isExternalTesting ? `
 
 ` : `
 🔧 FOR WEBFLOW/EXTERNAL TESTING:
-- For Webflow: Access enhanced integration guide at http://localhost:3001/webflow
+- For Webflow: Access enhanced integration guide at https://trackflow-webapp-production.up.railway.app/webflow
 - Click "Setup External Testing" button above
 - Install and run ngrok to create public tunnel
 - Use the generated HTTPS URL for external sites

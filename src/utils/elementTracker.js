@@ -12,7 +12,7 @@
   // Configuration
   const TRACKING_CONFIG = {
     debug: true,
-    apiEndpoint: 'http://localhost:3001/api/analytics/track',
+    apiEndpoint: 'https://trackflow-webapp-production.up.railway.app/api/analytics/track',
     batchSize: 10,
     batchTimeout: 5000,
     throttleMs: 100,
