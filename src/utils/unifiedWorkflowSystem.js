@@ -80,8 +80,9 @@
       try {
         this.log('🚀 Initializing unified workflow system...');
         
-        // Fetch all active workflows first
+        // Fetch all active workflows first - this is CRITICAL
         await this.fetchWorkflows();
+        this.log(`📊 Workflows loaded: ${this.workflows.size} workflows available`);
         
         // Execute priority actions immediately (like utm-magic.js priority execution)
         await this.executePriorityActions();
@@ -260,13 +261,26 @@
     async executePriorityActions() {
       this.log('⚡ Executing priority content replacement actions...');
       
+      if (this.workflows.size === 0) {
+        this.log('⚠️ No workflows loaded yet, skipping priority execution', 'warning');
+        return;
+      }
+      
       // Execute content replacement actions immediately for visible elements
       const priorityActions = [];
       
+      this.log(`🔍 Checking ${this.workflows.size} workflows for priority actions`);
+      
       this.workflows.forEach(workflow => {
-        if (!workflow.is_active) return;
+        this.log(`📋 Checking workflow: ${workflow.name} (active: ${workflow.is_active})`);
+        
+        if (!workflow.is_active) {
+          this.log(`⏭️ Skipping inactive workflow: ${workflow.name}`);
+          return;
+        }
         
         const triggerNodes = workflow.nodes?.filter(node => node.type === 'trigger') || [];
+        this.log(`🎯 Found ${triggerNodes.length} trigger nodes in workflow: ${workflow.name}`);
         
         triggerNodes.forEach(trigger => {
           // Check immediate triggers (device type, UTM, page load)
@@ -276,18 +290,34 @@
             utm: this.pageContext.utm
           };
           
-          if (this.evaluateTrigger(trigger, immediateEventData)) {
+          this.log(`🔍 Evaluating trigger "${trigger.name}" with data:`, 'info', {
+            trigger: trigger.config,
+            eventData: immediateEventData
+          });
+          
+          const triggerResult = this.evaluateTrigger(trigger, immediateEventData);
+          this.log(`📊 Trigger "${trigger.name}" result: ${triggerResult}`);
+          
+          if (triggerResult) {
+            this.log(`✅ Trigger matched! Finding connected actions...`);
             const actions = this.getConnectedActions(workflow, trigger.id);
             const contentActions = actions.filter(action => action.name === 'Replace Text');
+            this.log(`🎬 Found ${contentActions.length} content replacement actions`);
             priorityActions.push(...contentActions);
+          } else {
+            this.log(`❌ Trigger did not match`);
           }
         });
       });
       
+      this.log(`🎯 Total priority actions found: ${priorityActions.length}`);
+      
       if (priorityActions.length > 0) {
-        this.log(`🎯 Found ${priorityActions.length} priority content actions`);
+        this.log(`🚀 Executing ${priorityActions.length} priority content actions`, 'success');
         const promises = priorityActions.map(action => this.executeAction(action));
         await Promise.all(promises);
+      } else {
+        this.log(`⚠️ No priority actions found to execute`, 'warning');
       }
     }
 
@@ -1088,9 +1118,15 @@
     // Priority initialization for immediate content replacement
     const priorityInit = async () => {
       try {
-        // Fetch workflows and execute priority actions immediately
+        // Fetch workflows first, then execute priority actions
         await window.workflowSystem.fetchWorkflows();
-        await window.workflowSystem.executePriorityActions();
+        console.log(`🎯 Priority init: ${window.workflowSystem.workflows.size} workflows loaded`);
+        
+        if (window.workflowSystem.workflows.size > 0) {
+          await window.workflowSystem.executePriorityActions();
+        } else {
+          console.warn('🎯 Priority init: No workflows found, skipping priority execution');
+        }
       } catch (error) {
         console.error('🎯 Priority initialization failed:', error);
       }
