@@ -26,6 +26,7 @@
       this.workflows = new Map();
       this.executedActions = new Set();
       this.executedWorkflows = new Set(); // Track executed workflows to prevent duplicates
+      this.triggeredWorkflows = new Map(); // Cache triggered workflows to prevent re-triggering
       this.processingWorkflows = false; // Flag to prevent recursive processWorkflows calls
       this.pageContext = this.getPageContext();
       this.userContext = this.getUserContext();
@@ -37,6 +38,8 @@
       this.processedSelectors = new Set(); // Track processed selectors to prevent duplicates
       this.selectorRulesMap = new Map(); // Map selectors to rules for efficient processing
       this.mutationObserver = null; // For dynamic content tracking
+      this.lastScrollCheck = 0; // Throttle scroll events
+      this.lastTimeCheck = 0; // Throttle time-based triggers
       
       // Auto-hide content if enabled and anti-flicker script hasn't already done it
       if (this.config.hideContentDuringInit && !window.unifiedWorkflowAntiFlicker?.isContentHidden()) {
@@ -332,37 +335,66 @@
      * Set up event listeners for dynamic triggers
      */
     setupEventListeners() {
-      // Scroll depth tracking
+      // Scroll depth tracking with proper throttling
       let scrollTimeout;
       window.addEventListener('scroll', () => {
         clearTimeout(scrollTimeout);
         scrollTimeout = setTimeout(() => {
+          const now = Date.now();
+          // Only check scroll every 5 seconds to prevent spam
+          if (now - this.lastScrollCheck < 5000) {
+            return;
+          }
+          this.lastScrollCheck = now;
+          
           const scrollPercentage = Math.round(
             (window.scrollY / (document.documentElement.scrollHeight - window.innerHeight)) * 100
           );
           
-          this.handleEvent({
-            eventType: 'scroll',
-            scrollPercentage,
-            timestamp: Date.now()
-          });
-        }, 100);
+          // Only trigger on meaningful scroll milestones
+          if (scrollPercentage >= 25 && scrollPercentage % 25 === 0) {
+            this.handleEvent({
+              eventType: 'scroll',
+              scrollPercentage,
+              timestamp: now
+            });
+          }
+        }, 500); // Increased throttle to 500ms
       });
 
-      // Time on page tracking
+      // Time on page tracking - much less frequent and with caching
       let timeOnPage = 0;
-      setInterval(() => {
-        timeOnPage += 1;
-        this.handleEvent({
-          eventType: 'time_on_page',
-          timeOnPage,
-          timestamp: Date.now()
-        });
-      }, 1000);
+      const timeInterval = setInterval(() => {
+        timeOnPage += 10; // Increment by 10 seconds
+        const now = Date.now();
+        
+        // Only check time-based triggers every 30 seconds
+        if (now - this.lastTimeCheck < 30000) {
+          return;
+        }
+        this.lastTimeCheck = now;
+        
+        // Only trigger on meaningful time milestones (30s, 60s, 120s, etc.)
+        if (timeOnPage === 30 || timeOnPage === 60 || timeOnPage === 120 || timeOnPage === 300) {
+          this.handleEvent({
+            eventType: 'time_on_page',
+            timeOnPage,
+            timestamp: now
+          });
+        }
+      }, 10000); // Check every 10 seconds instead of every second
 
-      // Click tracking
+      // Click tracking - single execution per click
       document.addEventListener('click', (event) => {
         const selector = this.generateSelector(event.target);
+        const clickKey = `click-${selector}-${Date.now()}`;
+        
+        // Prevent duplicate click events
+        if (this.executedActions.has(clickKey)) {
+          return;
+        }
+        this.executedActions.add(clickKey);
+        
         this.handleEvent({
           eventType: 'click',
           elementSelector: selector,
@@ -371,9 +403,11 @@
         });
       });
 
-      // Exit intent detection
+      // Exit intent detection - only once per session
+      let exitIntentTriggered = false;
       document.addEventListener('mouseleave', (event) => {
-        if (event.clientY <= 0) {
+        if (event.clientY <= 0 && !exitIntentTriggered) {
+          exitIntentTriggered = true;
           this.handleEvent({
             eventType: 'exit_intent',
             timestamp: Date.now()
@@ -381,7 +415,7 @@
         }
       });
 
-      this.log('👂 Event listeners configured');
+      this.log('👂 Event listeners configured with proper throttling');
     }
 
     /**
@@ -470,46 +504,125 @@
     }
 
     /**
-     * Evaluate if a trigger matches the current event
+     * Evaluate if a trigger should fire for given event data
      */
     evaluateTrigger(trigger, eventData) {
-      const { config = {}, name } = trigger;
+      const { config = {} } = trigger;
       
-      switch (name) {
+      // Create a cache key for this trigger and event data
+      const triggerCacheKey = `${trigger.id}-${JSON.stringify(config)}-${eventData.eventType}`;
+      
+      // Check if this trigger has already been processed for similar conditions
+      if (this.triggeredWorkflows.has(triggerCacheKey)) {
+        const lastTriggered = this.triggeredWorkflows.get(triggerCacheKey);
+        const timeSinceLastTrigger = Date.now() - lastTriggered;
+        
+        // Prevent re-triggering the same condition within 30 seconds
+        if (timeSinceLastTrigger < 30000) {
+          return false;
+        }
+      }
+      
+      let shouldTrigger = false;
+      
+      switch (config.triggerType) {
         case 'Device Type':
-          return this.pageContext.deviceType === config.deviceType;
+          shouldTrigger = this.evaluateDeviceTypeTrigger(config, eventData);
+          break;
           
         case 'UTM Parameters':
-          if (!this.pageContext.utm) return false;
-          const utmValue = this.pageContext.utm[config.parameter];
-          switch (config.operator) {
-            case 'equals': return utmValue === config.value;
-            case 'contains': return utmValue && utmValue.includes(config.value);
-            case 'exists': return Boolean(utmValue);
-            default: return false;
-          }
+          shouldTrigger = this.evaluateUTMTrigger(config, eventData);
+          break;
           
         case 'Page Visits':
-          return eventData.visitCount >= (config.visitCount || 3);
+          shouldTrigger = this.evaluatePageVisitTrigger(config, eventData);
+          break;
           
         case 'Time on Page':
-          const thresholdSeconds = config.unit === 'minutes' ? config.duration * 60 : config.duration;
-          return eventData.timeOnPage >= thresholdSeconds;
+          shouldTrigger = this.evaluateTimeOnPageTrigger(config, eventData);
+          break;
           
         case 'Scroll Depth':
-          return eventData.scrollPercentage >= (config.percentage || 50);
+          shouldTrigger = this.evaluateScrollDepthTrigger(config, eventData);
+          break;
           
         case 'Element Click':
-          return eventData.eventType === 'click' && 
-                 eventData.elementSelector === config.selector;
+          shouldTrigger = this.evaluateElementClickTrigger(config, eventData);
+          break;
           
         case 'Exit Intent':
-          return eventData.eventType === 'exit_intent';
+          shouldTrigger = this.evaluateExitIntentTrigger(config, eventData);
+          break;
           
         default:
-          this.log(`⚠️ Unknown trigger type: ${name}`, 'warning');
-          return false;
+          this.log(`⚠️ Unknown trigger type: ${config.triggerType}`, 'warning');
+          shouldTrigger = false;
       }
+      
+      // Cache successful triggers to prevent immediate re-triggering
+      if (shouldTrigger) {
+        this.triggeredWorkflows.set(triggerCacheKey, Date.now());
+      }
+      
+      return shouldTrigger;
+    }
+
+    /**
+     * Evaluate device type trigger
+     */
+    evaluateDeviceTypeTrigger(config, eventData) {
+      return this.pageContext.deviceType === config.deviceType;
+    }
+
+    /**
+     * Evaluate UTM parameters trigger
+     */
+    evaluateUTMTrigger(config, eventData) {
+      if (!this.pageContext.utm) return false;
+      const utmValue = this.pageContext.utm[config.parameter];
+      switch (config.operator) {
+        case 'equals': return utmValue === config.value;
+        case 'contains': return utmValue && utmValue.includes(config.value);
+        case 'exists': return Boolean(utmValue);
+        default: return false;
+      }
+    }
+
+    /**
+     * Evaluate page visits trigger
+     */
+    evaluatePageVisitTrigger(config, eventData) {
+      return eventData.visitCount >= (config.visitCount || 3);
+    }
+
+    /**
+     * Evaluate time on page trigger
+     */
+    evaluateTimeOnPageTrigger(config, eventData) {
+      const thresholdSeconds = config.unit === 'minutes' ? config.duration * 60 : config.duration;
+      return eventData.timeOnPage >= thresholdSeconds;
+    }
+
+    /**
+     * Evaluate scroll depth trigger
+     */
+    evaluateScrollDepthTrigger(config, eventData) {
+      return eventData.scrollPercentage >= (config.percentage || 50);
+    }
+
+    /**
+     * Evaluate element click trigger
+     */
+    evaluateElementClickTrigger(config, eventData) {
+      return eventData.eventType === 'click' && 
+             eventData.elementSelector === config.selector;
+    }
+
+    /**
+     * Evaluate exit intent trigger
+     */
+    evaluateExitIntentTrigger(config, eventData) {
+      return eventData.eventType === 'exit_intent';
     }
 
     /**
@@ -1251,6 +1364,9 @@
 
   // Auto-initialize if not already done and not disabled
   if (!window.workflowSystem && !window.DISABLE_LEGACY_WORKFLOWS) {
+    // Disable other workflow systems to prevent conflicts
+    window.DISABLE_LEGACY_WORKFLOWS = true;
+    
     window.workflowSystem = new UnifiedWorkflowSystem();
     
     // Track initialization state
@@ -1324,5 +1440,9 @@
       priorityInit().then(() => fullInit());
     }
   }
+  
+  // Log that unified system is active
+  console.log('🎯 Unified Workflow System: Active and preventing legacy systems');
+  console.log('🎯 DISABLE_LEGACY_WORKFLOWS:', window.DISABLE_LEGACY_WORKFLOWS);
 
 })(); 
