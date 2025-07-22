@@ -196,13 +196,22 @@
         }
       });
       
-      // Start observing
-      if (document.body) {
-        this.mutationObserver.observe(document.body, { 
-          childList: true, 
-          subtree: true 
-        });
-        this.log('Mutation observer setup for dynamic content (content replacement only)');
+      // Start observing - add safety check
+      if (document.body && document.body.nodeType === 1) {
+        try {
+          this.mutationObserver.observe(document.body, { 
+            childList: true, 
+            subtree: true 
+          });
+          this.log('Mutation observer setup for dynamic content (content replacement only)');
+        } catch (error) {
+          this.log('Failed to setup mutation observer: ' + error.message, 'error');
+          this.mutationObserver = null;
+        }
+      } else {
+        this.log('Document body not ready for mutation observer', 'warning');
+        // Retry when DOM is ready
+        setTimeout(() => this.setupMutationObserver(), 1000);
       }
     }
 
@@ -1516,6 +1525,11 @@
       // Document already loaded - run priority init then full init
       priorityInit().then(() => fullInit());
     }
+  }
+  
+  // Export UnifiedWorkflowSystem to global scope
+  if (typeof window !== 'undefined') {
+    window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
   }
   
   // Log that unified system is active

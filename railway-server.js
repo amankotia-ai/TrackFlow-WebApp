@@ -741,16 +741,16 @@ app.get('/api/workflows/active', async (req, res) => {
       });
     }
     
-    // Fallback to demo workflows using service role (bypasses RLS)
-    console.log('⚠️ No API key provided, using service role for demo workflows');
+    // Fallback to demo workflows using anon client (RLS disabled)
+    console.log('⚠️ No API key provided, using anon client for workflows (RLS disabled)');
     
-    // Use service role client to access demo workflows (bypasses RLS)
-    const { data: workflows, error } = await supabaseServiceRole
+    // Use anon client now that RLS is disabled
+    const { data: workflows, error } = await supabase
       .from('workflows_with_nodes')
       .select('*')
       .eq('is_active', true)
       .eq('status', 'active')
-      .limit(10); // Limit demo workflows for security
+      .limit(50); // Increase limit since RLS is disabled
     
     if (error) {
       console.error('❌ Supabase error:', error);
@@ -948,18 +948,61 @@ app.post('/api/workflows/create-demo', async (req, res) => {
       }
     ];
     
-    // Insert workflow using the save_workflow_complete function
-    const { data: workflowId, error } = await supabase.rpc('save_workflow_complete', {
-      p_workflow_id: null, // Create new
-      p_user_id: testUserId,
-      p_name: demoWorkflow.name,
-      p_description: demoWorkflow.description,
-      p_is_active: demoWorkflow.is_active,
-      p_status: demoWorkflow.status,
-      p_target_url: demoWorkflow.target_url,
-      p_nodes: demoNodes,
-      p_connections: demoConnections
-    });
+    // Insert workflow directly since RLS is disabled
+    const { data: workflowResult, error: workflowError } = await supabase
+      .from('workflows')
+      .insert({
+        user_id: testUserId,
+        name: demoWorkflow.name,
+        description: demoWorkflow.description,
+        is_active: demoWorkflow.is_active,
+        status: demoWorkflow.status,
+        target_url: demoWorkflow.target_url
+      })
+      .select('id')
+      .single();
+    
+    if (workflowError) {
+      console.error('❌ Failed to create demo workflow:', workflowError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create demo workflow',
+        details: workflowError.message
+      });
+    }
+    
+    const workflowId = workflowResult.id;
+    
+    // Insert nodes
+    const nodesWithWorkflowId = demoNodes.map(node => ({
+      ...node,
+      workflow_id: workflowId
+    }));
+    
+    const { error: nodesError } = await supabase
+      .from('workflow_nodes')
+      .insert(nodesWithWorkflowId);
+    
+    if (nodesError) {
+      console.error('❌ Failed to create demo nodes:', nodesError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create demo nodes',
+        details: nodesError.message
+      });
+    }
+    
+    // Insert connections
+    const connectionsWithWorkflowId = demoConnections.map(connection => ({
+      ...connection,
+      workflow_id: workflowId
+    }));
+    
+    const { error: connectionsError } = await supabase
+      .from('workflow_connections')
+      .insert(connectionsWithWorkflowId);
+    
+    const error = connectionsError;
     
     if (error) {
       console.error('❌ Failed to create demo workflow:', error);
