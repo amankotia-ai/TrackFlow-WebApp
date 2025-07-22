@@ -186,6 +186,9 @@ app.get('/api/unified-workflow-system.js', (req, res) => {
     autoInit: true
   };
   
+  // Disable auto-initialization of legacy systems BEFORE loading scripts
+  window.DISABLE_LEGACY_WORKFLOWS = true;
+  
   ${elementTracker}
   
   ${unifiedWorkflow}
@@ -198,23 +201,28 @@ app.get('/api/unified-workflow-system.js', (req, res) => {
     window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
   }
   
-  // Auto-initialize after scripts load
+  // Disable auto-initialization of individual systems to prevent conflicts
+  window.DISABLE_LEGACY_WORKFLOWS = true;
+  
+  // Auto-initialize ONLY the unified system after scripts load
   document.addEventListener('DOMContentLoaded', function() {
-    console.log('🎯 TrackFlow: DOM loaded, initializing system...');
+    console.log('🎯 TrackFlow: DOM loaded, initializing unified system only...');
     
-    // Initialize element tracker
-    if (typeof ElementEventTracker !== 'undefined') {
-      window.elementTracker = new ElementEventTracker(window.TRACKFLOW_CONFIG);
-      console.log('✅ TrackFlow: Element tracker initialized');
-    }
+    // Skip element tracker initialization - unified system includes tracking
+    console.log('🎯 TrackFlow: Skipping separate ElementEventTracker (using unified system)');
     
-    // Initialize unified workflow system
+    // Initialize ONLY unified workflow system (which includes tracking)
     if (typeof UnifiedWorkflowSystem !== 'undefined') {
-      window.workflowSystem = new UnifiedWorkflowSystem({
-        ...window.TRACKFLOW_CONFIG,
-        elementTracker: window.elementTracker
-      });
-      console.log('✅ TrackFlow: Workflow system initialized');
+      if (!window.workflowSystem) {
+        window.workflowSystem = new UnifiedWorkflowSystem({
+          ...window.TRACKFLOW_CONFIG
+        });
+        console.log('✅ TrackFlow: Unified workflow system initialized (includes tracking)');
+      } else {
+        console.log('🎯 TrackFlow: Workflow system already exists, skipping');
+      }
+    } else {
+      console.error('❌ TrackFlow: UnifiedWorkflowSystem not available');
     }
     
     // Track initial page load
