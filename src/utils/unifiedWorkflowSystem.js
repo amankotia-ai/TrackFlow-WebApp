@@ -430,6 +430,7 @@
      */
     async processWorkflows(eventData) {
       if (this.workflows.size === 0) {
+        this.log('⚠️ No workflows available to process', 'warning');
         return;
       }
 
@@ -440,16 +441,26 @@
       }
 
       this.processingWorkflows = true;
+      
+      this.log(`🔄 Processing ${this.workflows.size} workflows for event: ${eventData.eventType}`, 'info');
 
       try {
         for (const [workflowId, workflow] of this.workflows) {
           const isActive = workflow.is_active ?? workflow.isActive ?? true;
-          if (!isActive) continue;
+          if (!isActive) {
+            this.log(`⏭️ Skipping inactive workflow: ${workflow.name}`, 'info');
+            continue;
+          }
+
+          this.log(`📋 Processing workflow: ${workflow.name} (active: ${isActive})`, 'info');
 
           // Find trigger nodes
           const triggerNodes = workflow.nodes?.filter(node => node.type === 'trigger') || [];
+          this.log(`🎯 Found ${triggerNodes.length} trigger nodes in workflow: ${workflow.name}`, 'info');
           
           for (const trigger of triggerNodes) {
+            this.log(`🔍 Evaluating trigger: ${trigger.name || trigger.config?.triggerType}`, 'info');
+            
             if (this.evaluateTrigger(trigger, eventData)) {
               this.log(`🎯 Workflow triggered: ${workflow.name} by ${trigger.name}`, 'success');
               
@@ -495,11 +506,14 @@
                 actionsExecuted: executedActions || [],
                 executionKey: executionKey
               });
+            } else {
+              this.log(`❌ Trigger did not match: ${trigger.name || trigger.config?.triggerType}`, 'info');
             }
           }
         }
       } finally {
         this.processingWorkflows = false;
+        this.log(`✅ Finished processing workflows for event: ${eventData.eventType}`, 'info');
       }
     }
 
@@ -507,25 +521,40 @@
      * Evaluate if a trigger should fire for given event data
      */
     evaluateTrigger(trigger, eventData) {
-      const { config = {} } = trigger;
+      const { config = {}, name } = trigger;
+      
+      // Use triggerType from config or name from trigger
+      const triggerType = config.triggerType || name;
+      
+      this.log(`🔍 Evaluating trigger: ${triggerType} for event: ${eventData.eventType}`, 'info', {
+        trigger: trigger,
+        eventData: eventData,
+        triggerType: triggerType
+      });
       
       // Create a cache key for this trigger and event data
-      const triggerCacheKey = `${trigger.id}-${JSON.stringify(config)}-${eventData.eventType}`;
+      const triggerCacheKey = `${trigger.id}-${triggerType}-${eventData.eventType}`;
+      
+      // For immediate triggers (page_load, device type, UTM), allow re-execution more frequently
+      const isImmediateTrigger = eventData.eventType === 'page_load' || 
+                                triggerType === 'Device Type' || 
+                                triggerType === 'UTM Parameters';
       
       // Check if this trigger has already been processed for similar conditions
-      if (this.triggeredWorkflows.has(triggerCacheKey)) {
+      if (this.triggeredWorkflows.has(triggerCacheKey) && !isImmediateTrigger) {
         const lastTriggered = this.triggeredWorkflows.get(triggerCacheKey);
         const timeSinceLastTrigger = Date.now() - lastTriggered;
         
-        // Prevent re-triggering the same condition within 30 seconds
+        // Prevent re-triggering the same condition within 30 seconds (except immediate triggers)
         if (timeSinceLastTrigger < 30000) {
+          this.log(`⏭️ Skipping cached trigger: ${triggerType} (last triggered ${Math.round(timeSinceLastTrigger/1000)}s ago)`, 'info');
           return false;
         }
       }
       
       let shouldTrigger = false;
       
-      switch (config.triggerType) {
+      switch (triggerType) {
         case 'Device Type':
           shouldTrigger = this.evaluateDeviceTypeTrigger(config, eventData);
           break;
@@ -555,12 +584,14 @@
           break;
           
         default:
-          this.log(`⚠️ Unknown trigger type: ${config.triggerType}`, 'warning');
+          this.log(`⚠️ Unknown trigger type: ${triggerType}`, 'warning');
           shouldTrigger = false;
       }
       
-      // Cache successful triggers to prevent immediate re-triggering
-      if (shouldTrigger) {
+      this.log(`📊 Trigger evaluation result: ${triggerType} = ${shouldTrigger}`, shouldTrigger ? 'success' : 'info');
+      
+      // Cache successful triggers to prevent immediate re-triggering (except immediate triggers)
+      if (shouldTrigger && !isImmediateTrigger) {
         this.triggeredWorkflows.set(triggerCacheKey, Date.now());
       }
       
