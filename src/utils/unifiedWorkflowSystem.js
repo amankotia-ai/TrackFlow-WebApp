@@ -51,26 +51,31 @@
     }
 
     /**
-     * Enhanced logging with proper debug mode check
+     * Enhanced logging with proper debug mode check and error handling
      */
     log(message, level = 'info', data = null) {
-      if (!this.config.debug && level !== 'error') return;
-      
-      const prefix = '🎯 Unified Workflow System:';
-      const timestamp = new Date().toLocaleTimeString();
-      
-      switch (level) {
-        case 'error':
-          console.error(`${prefix} [${timestamp}] ❌ ${message}`, data || '');
-          break;
-        case 'warning':
-          console.warn(`${prefix} [${timestamp}] ⚠️ ${message}`, data || '');
-          break;
-        case 'success':
-          console.log(`${prefix} [${timestamp}] ✅ ${message}`, data || '');
-          break;
-        default:
-          console.log(`${prefix} [${timestamp}] ${message}`, data || '');
+      try {
+        if (!this.config.debug && level !== 'error') return;
+        
+        const prefix = '🎯 Unified Workflow System:';
+        const timestamp = new Date().toLocaleTimeString();
+        
+        switch (level) {
+          case 'error':
+            console.error(`${prefix} [${timestamp}] ❌ ${message}`, data || '');
+            break;
+          case 'warning':
+            console.warn(`${prefix} [${timestamp}] ⚠️ ${message}`, data || '');
+            break;
+          case 'success':
+            console.log(`${prefix} [${timestamp}] ✅ ${message}`, data || '');
+            break;
+          default:
+            console.log(`${prefix} [${timestamp}] ${message}`, data || '');
+        }
+      } catch (logError) {
+        // Fallback to basic console.log if enhanced logging fails
+        console.log(`[UnifiedWorkflowSystem] ${message}`, data || '');
       }
     }
 
@@ -163,29 +168,57 @@
           this.log('🔑 Using API key authentication');
         }
         
-        const response = await fetch(url, { 
-          headers,
-          method: 'GET',
-          credentials: 'omit' // Don't send cookies for CORS
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        let response;
+        try {
+          response = await fetch(url, { 
+            headers,
+            method: 'GET',
+            credentials: 'omit', // Don't send cookies for CORS
+            timeout: 15000 // 15 second timeout
+          });
+        } catch (fetchError) {
+          this.log(`❌ Network error fetching workflows: ${fetchError.message}`, 'error');
+          return [];
         }
         
-        const data = await response.json();
+        if (!response) {
+          this.log('❌ No response received from workflows endpoint', 'error');
+          return [];
+        }
         
-        if (data.success && data.workflows) {
+        if (!response.ok) {
+          this.log(`❌ HTTP error fetching workflows: ${response.status} ${response.statusText}`, 'error');
+          return [];
+        }
+        
+        let data;
+        try {
+          data = await response.json();
+        } catch (parseError) {
+          this.log(`❌ Failed to parse workflow response: ${parseError.message}`, 'error');
+          return [];
+        }
+        
+        if (!data) {
+          this.log('❌ Empty response from workflows endpoint', 'error');
+          return [];
+        }
+        
+        if (data.success && Array.isArray(data.workflows)) {
           // Store workflows in Map for efficient lookup
           data.workflows.forEach(workflow => {
-            this.workflows.set(workflow.id, workflow);
+            if (workflow && workflow.id) {
+              this.workflows.set(workflow.id, workflow);
+            } else {
+              this.log('⚠️ Skipping invalid workflow (missing id)', 'warning', workflow);
+            }
           });
           
           this.log(`✅ Loaded ${data.workflows.length} active workflows`);
           return data.workflows;
         }
         
-        this.log('⚠️ No active workflows found', 'warning');
+        this.log('⚠️ No active workflows found or invalid response format', 'warning', data);
         return [];
         
       } catch (error) {
@@ -715,81 +748,107 @@
      * Evaluate if a trigger should fire for given event data
      */
     evaluateTrigger(trigger, eventData) {
-      const { config = {}, name } = trigger;
-      
-      // Use triggerType from config or name from trigger
-      const triggerType = config.triggerType || name;
-      
-      this.log(`🔍 Evaluating trigger: ${triggerType} for event: ${eventData.eventType}`, 'info', {
-        trigger: trigger,
-        eventData: eventData,
-        triggerType: triggerType
-      });
-      
-      // Create a cache key for this trigger and event data
-      const triggerCacheKey = `${trigger.id}-${triggerType}-${eventData.eventType}`;
-      
-      // For immediate triggers (page_load, device type, UTM), allow re-execution more frequently
-      const isImmediateTrigger = eventData.eventType === 'page_load' || 
-                                triggerType === 'Device Type' || 
-                                triggerType === 'UTM Parameters';
-      
-      // Check if this trigger has already been processed for similar conditions
-      if (this.triggeredWorkflows.has(triggerCacheKey) && !isImmediateTrigger) {
-        const lastTriggered = this.triggeredWorkflows.get(triggerCacheKey);
-        const timeSinceLastTrigger = Date.now() - lastTriggered;
-        
-        // Prevent re-triggering the same condition within 30 seconds (except immediate triggers)
-        if (timeSinceLastTrigger < 30000) {
-          this.log(`⏭️ Skipping cached trigger: ${triggerType} (last triggered ${Math.round(timeSinceLastTrigger/1000)}s ago)`, 'info');
+      try {
+        if (!trigger || typeof trigger !== 'object') {
+          this.log('⚠️ Invalid trigger provided to evaluateTrigger', 'warning', trigger);
           return false;
         }
-      }
-      
-      let shouldTrigger = false;
-      
-      switch (triggerType) {
-        case 'Device Type':
-          shouldTrigger = this.evaluateDeviceTypeTrigger(config, eventData);
-          break;
+        
+        if (!eventData || typeof eventData !== 'object') {
+          this.log('⚠️ Invalid eventData provided to evaluateTrigger', 'warning', eventData);
+          return false;
+        }
+        
+        const { config = {}, name } = trigger;
+        
+        // Use triggerType from config or name from trigger
+        const triggerType = config.triggerType || name;
+        
+        if (!triggerType) {
+          this.log('⚠️ No trigger type found in trigger configuration', 'warning', trigger);
+          return false;
+        }
+        
+        this.log(`🔍 Evaluating trigger: ${triggerType} for event: ${eventData.eventType}`, 'info', {
+          trigger: trigger,
+          eventData: eventData,
+          triggerType: triggerType
+        });
+        
+        // Create a cache key for this trigger and event data
+        const triggerCacheKey = `${trigger.id || 'unknown'}-${triggerType}-${eventData.eventType || 'unknown'}`;
+        
+        // For immediate triggers (page_load, device type, UTM), allow re-execution more frequently
+        const isImmediateTrigger = eventData.eventType === 'page_load' || 
+                                  triggerType === 'Device Type' || 
+                                  triggerType === 'UTM Parameters';
+        
+        // Check if this trigger has already been processed for similar conditions
+        if (this.triggeredWorkflows && this.triggeredWorkflows.has(triggerCacheKey) && !isImmediateTrigger) {
+          const lastTriggered = this.triggeredWorkflows.get(triggerCacheKey);
+          const timeSinceLastTrigger = Date.now() - lastTriggered;
           
-        case 'UTM Parameters':
-          shouldTrigger = this.evaluateUTMTrigger(config, eventData);
-          break;
-          
-        case 'Page Visits':
-          shouldTrigger = this.evaluatePageVisitTrigger(config, eventData);
-          break;
-          
-        case 'Time on Page':
-          shouldTrigger = this.evaluateTimeOnPageTrigger(config, eventData);
-          break;
-          
-        case 'Scroll Depth':
-          shouldTrigger = this.evaluateScrollDepthTrigger(config, eventData);
-          break;
-          
-        case 'Element Click':
-          shouldTrigger = this.evaluateElementClickTrigger(config, eventData);
-          break;
-          
-        case 'Exit Intent':
-          shouldTrigger = this.evaluateExitIntentTrigger(config, eventData);
-          break;
-          
-        default:
-          this.log(`⚠️ Unknown trigger type: ${triggerType}`, 'warning');
+          // Prevent re-triggering the same condition within 30 seconds (except immediate triggers)
+          if (timeSinceLastTrigger < 30000) {
+            this.log(`⏭️ Skipping cached trigger: ${triggerType} (last triggered ${Math.round(timeSinceLastTrigger/1000)}s ago)`, 'info');
+            return false;
+          }
+        }
+        
+        let shouldTrigger = false;
+        
+        try {
+          switch (triggerType) {
+            case 'Device Type':
+              shouldTrigger = this.evaluateDeviceTypeTrigger(config, eventData);
+              break;
+              
+            case 'UTM Parameters':
+              shouldTrigger = this.evaluateUTMTrigger(config, eventData);
+              break;
+              
+            case 'Page Visits':
+              shouldTrigger = this.evaluatePageVisitTrigger(config, eventData);
+              break;
+              
+            case 'Time on Page':
+              shouldTrigger = this.evaluateTimeOnPageTrigger(config, eventData);
+              break;
+              
+            case 'Scroll Depth':
+              shouldTrigger = this.evaluateScrollDepthTrigger(config, eventData);
+              break;
+              
+            case 'Element Click':
+              shouldTrigger = this.evaluateElementClickTrigger(config, eventData);
+              break;
+              
+            case 'Exit Intent':
+              shouldTrigger = this.evaluateExitIntentTrigger(config, eventData);
+              break;
+              
+            default:
+              this.log(`⚠️ Unknown trigger type: ${triggerType}`, 'warning');
+              shouldTrigger = false;
+          }
+        } catch (evaluationError) {
+          this.log(`❌ Error evaluating trigger ${triggerType}: ${evaluationError.message}`, 'error');
           shouldTrigger = false;
+        }
+        
+        this.log(`📊 Trigger evaluation result: ${triggerType} = ${shouldTrigger}`, shouldTrigger ? 'success' : 'info');
+        
+        // Cache successful triggers to prevent immediate re-triggering (except immediate triggers)
+        if (shouldTrigger && !isImmediateTrigger && this.triggeredWorkflows) {
+          this.triggeredWorkflows.set(triggerCacheKey, Date.now());
+        }
+        
+        return shouldTrigger;
+        
+      } catch (error) {
+        this.log(`❌ Critical error in evaluateTrigger: ${error.message}`, 'error');
+        return false;
       }
-      
-      this.log(`📊 Trigger evaluation result: ${triggerType} = ${shouldTrigger}`, shouldTrigger ? 'success' : 'info');
-      
-      // Cache successful triggers to prevent immediate re-triggering (except immediate triggers)
-      if (shouldTrigger && !isImmediateTrigger) {
-        this.triggeredWorkflows.set(triggerCacheKey, Date.now());
-      }
-      
-      return shouldTrigger;
     }
 
     /**
@@ -1721,114 +1780,109 @@
   }
 
   // Prevent multiple instances and conflicts with legacy systems
-  if (window.workflowSystem) {
-    console.log('🎯 Unified Workflow System: Instance already exists, skipping initialization');
-    return;
-  }
-
-  // Validate that UnifiedWorkflowSystem is available before proceeding
-  if (typeof UnifiedWorkflowSystem === 'undefined') {
-    console.error('❌ UnifiedWorkflowSystem class not available during initialization');
-    return;
-  }
-
-  // Auto-initialize only if not explicitly disabled and no existing instance
-  if (!window.DISABLE_LEGACY_WORKFLOWS && !window.workflowSystem) {
-    // Disable other workflow systems to prevent conflicts
-    window.DISABLE_LEGACY_WORKFLOWS = true;
+  if (window.workflowSystem && window.workflowSystem.initialized) {
+    console.log('🎯 Unified Workflow System: Instance already exists and initialized, skipping initialization');
+  } else if (window.DISABLE_LEGACY_WORKFLOWS && window.workflowSystem) {
+    console.log('🎯 Unified Workflow System: Instance exists but not initialized, will initialize');
+  } else {
+    // Auto-initialize only if not explicitly disabled and no existing functional instance
+    if (!window.DISABLE_LEGACY_WORKFLOWS) {
+      // Set the flag first to prevent conflicts
+      window.DISABLE_LEGACY_WORKFLOWS = true;
+      console.log('🎯 Unified Workflow System: Setting DISABLE_LEGACY_WORKFLOWS to prevent conflicts');
+    }
     
     console.log('🎯 Unified Workflow System: Initializing new instance...');
     
     // Ensure UnifiedWorkflowSystem is available
     if (typeof UnifiedWorkflowSystem === 'undefined') {
       console.error('❌ UnifiedWorkflowSystem class not available');
-      return;
-    }
-    
-    // Check if configuration is available from the Railway server integration
-    const config = window.TRACKFLOW_CONFIG || {};
-    
-    // Create instance but don't auto-initialize (will be done by Railway server script)
-    window.workflowSystem = new UnifiedWorkflowSystem(config);
-    
-    console.log('✅ Unified Workflow System instance created and ready for external initialization');
-    
-    // Only auto-initialize if we're NOT being loaded by the Railway server
-    if (!window.TRACKFLOW_CONFIG) {
-      console.log('🎯 No external config detected, starting auto-initialization...');
+    } else {
+      // Check if configuration is available from the Railway server integration
+      const config = window.TRACKFLOW_CONFIG || {};
       
-      // Track initialization state
-      let initializationStarted = false;
+      // Create instance
+      if (!window.workflowSystem) {
+        window.workflowSystem = new UnifiedWorkflowSystem(config);
+        console.log('✅ Unified Workflow System instance created');
+      }
       
-      const startInitialization = async () => {
-        if (initializationStarted) {
-          console.log('🎯 Initialization already started, skipping');
-          return;
-        }
-        
-        initializationStarted = true;
-        
+      // Initialize immediately if DOM is ready, otherwise wait
+      const initializeSystem = async () => {
         try {
-          console.log('🎯 Starting unified workflow system initialization...');
-          await window.workflowSystem.initialize();
-          console.log('✅ Unified workflow system initialized successfully');
+          if (!window.workflowSystem.initialized) {
+            console.log('🎯 Starting unified workflow system initialization...');
+            await window.workflowSystem.initialize();
+            console.log('✅ Unified workflow system initialized successfully');
+            
+            // Dispatch ready event
+            if (typeof CustomEvent !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('unifiedWorkflowSystemReady', {
+                detail: { system: window.workflowSystem }
+              }));
+            }
+          } else {
+            console.log('🎯 Unified workflow system already initialized');
+          }
         } catch (error) {
           console.error('❌ Unified workflow system initialization failed:', error);
           
           // Ensure content is shown even if initialization fails
-          if (window.workflowSystem && typeof window.workflowSystem.showContent === 'function') {
-            window.workflowSystem.showContent();
-          } else if (window.unifiedWorkflowAntiFlicker) {
-            window.unifiedWorkflowAntiFlicker.showContent();
-          } else {
-            // Fallback content reveal
-            if (document.body) {
-              document.body.style.visibility = 'visible';
-              document.body.style.opacity = '1';
+          try {
+            if (window.workflowSystem && typeof window.workflowSystem.showContent === 'function') {
+              window.workflowSystem.showContent();
+            } else if (window.unifiedWorkflowAntiFlicker && typeof window.unifiedWorkflowAntiFlicker.showContent === 'function') {
+              window.unifiedWorkflowAntiFlicker.showContent();
+            } else {
+              // Fallback content reveal
+              if (document.body) {
+                document.body.style.visibility = 'visible';
+                document.body.style.opacity = '1';
+              }
             }
+          } catch (fallbackError) {
+            console.error('❌ Failed to show content after initialization failure:', fallbackError);
           }
         }
       };
       
-      // Initialize when DOM is ready
+      // Initialize based on DOM state
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startInitialization, { once: true });
+        // DOM still loading - wait for DOMContentLoaded
+        document.addEventListener('DOMContentLoaded', initializeSystem, { once: true });
+        console.log('🎯 Waiting for DOMContentLoaded to initialize system');
       } else {
-        // Document already loaded - start immediately
-        setTimeout(startInitialization, 0);
+        // DOM already loaded - initialize immediately
+        console.log('🎯 DOM already loaded, initializing system immediately');
+        setTimeout(initializeSystem, 0);
       }
       
       // Safety timeout to ensure content is shown even if everything fails
       setTimeout(() => {
-        if (!initializationStarted) {
+        if (!window.workflowSystem || !window.workflowSystem.initialized) {
           console.warn('🎯 Unified Workflow System: Safety timeout reached, forcing content reveal');
-          if (window.workflowSystem && typeof window.workflowSystem.showContent === 'function') {
-            window.workflowSystem.showContent();
-          } else if (window.unifiedWorkflowAntiFlicker) {
-            window.unifiedWorkflowAntiFlicker.showContent();
-          } else {
-            // Fallback content reveal
-            if (document.body) {
-              document.body.style.visibility = 'visible';
-              document.body.style.opacity = '1';
+          try {
+            if (window.workflowSystem && typeof window.workflowSystem.showContent === 'function') {
+              window.workflowSystem.showContent();
+            } else if (window.unifiedWorkflowAntiFlicker && typeof window.unifiedWorkflowAntiFlicker.showContent === 'function') {
+              window.unifiedWorkflowAntiFlicker.showContent();
+            } else {
+              // Fallback content reveal
+              if (document.body) {
+                document.body.style.visibility = 'visible';
+                document.body.style.opacity = '1';
+              }
             }
+          } catch (fallbackError) {
+            console.error('❌ Safety timeout fallback failed:', fallbackError);
           }
         }
       }, 10000); // 10 second safety timeout
     }
-  } else if (window.workflowSystem) {
-    console.log('🎯 Unified Workflow System: Instance already exists, skipping auto-initialization');
-  } else if (window.DISABLE_LEGACY_WORKFLOWS) {
-    console.log('🎯 Unified Workflow System: Legacy workflows disabled, skipping auto-initialization');
   }
-  
-  // Export UnifiedWorkflowSystem to global scope
-  if (typeof window !== 'undefined') {
-    window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
-  }
-  
+
   // Log that unified system is active
-  console.log('🎯 Unified Workflow System: Active and preventing legacy systems');
+  console.log('🎯 Unified Workflow System: Script loaded and ready');
   console.log('🎯 DISABLE_LEGACY_WORKFLOWS:', window.DISABLE_LEGACY_WORKFLOWS);
 
 })(); 

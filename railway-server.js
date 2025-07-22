@@ -1010,6 +1010,124 @@ app.post('/api/workflows/create-demo', async (req, res) => {
   }
 });
 
+// Test workflow execution endpoint (replaces api/test-workflow.js)
+app.post('/api/test-workflow', async (req, res) => {
+  try {
+    const { workflowId, eventData } = req.body;
+    
+    if (!workflowId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing workflowId' 
+      });
+    }
+
+    console.log(`🧪 Testing workflow ${workflowId} with event data:`, eventData);
+
+    // Fetch the workflow from the database
+    const { data: workflowData, error: workflowError } = await supabase
+      .from('workflows_with_nodes')
+      .select('*')
+      .eq('id', workflowId)
+      .single();
+
+    if (workflowError || !workflowData) {
+      console.error('❌ Workflow not found:', workflowError);
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Workflow not found' 
+      });
+    }
+
+    // Find the trigger node
+    const triggerNode = workflowData.nodes?.find(node => node.type === 'trigger');
+    let triggerMatches = false;
+    let actions = [];
+    let triggerResult = null;
+
+    if (triggerNode) {
+      console.log('🎯 Evaluating trigger:', triggerNode.name, triggerNode.config);
+      
+      // Simulate trigger evaluation
+      if (triggerNode.name === 'UTM Parameters' && eventData?.utm) {
+        const { parameter, value, operator } = triggerNode.config;
+        const utmValue = eventData.utm[parameter];
+        switch (operator || 'equals') {
+          case 'equals':
+            triggerMatches = utmValue === value;
+            break;
+          case 'contains':
+            triggerMatches = utmValue && utmValue.includes(value);
+            break;
+          case 'exists':
+            triggerMatches = Boolean(utmValue);
+            break;
+          default:
+            triggerMatches = false;
+        }
+        triggerResult = { parameter, value, operator, utmValue, matches: triggerMatches };
+      } else if (triggerNode.name === 'Device Type' && eventData?.deviceType) {
+        triggerMatches = triggerNode.config.deviceType === eventData.deviceType;
+        triggerResult = { 
+          expected: triggerNode.config.deviceType, 
+          actual: eventData.deviceType, 
+          matches: triggerMatches 
+        };
+      } else if (triggerNode.name === 'Page Visits' && eventData?.visitCount) {
+        triggerMatches = eventData.visitCount >= (triggerNode.config.visitCount || 1);
+        triggerResult = { 
+          required: triggerNode.config.visitCount, 
+          actual: eventData.visitCount, 
+          matches: triggerMatches 
+        };
+      } else {
+        // For other triggers, assume they don't match
+        triggerMatches = false;
+        triggerResult = { reason: 'Trigger type not supported in test mode or missing event data' };
+      }
+
+      // If trigger matches, find connected actions
+      if (triggerMatches) {
+        const connectedActionIds = workflowData.connections
+          ?.filter(conn => conn.sourceNodeId === triggerNode.id)
+          ?.map(conn => conn.targetNodeId) || [];
+        actions = workflowData.nodes?.filter(node => 
+          node.type === 'action' && connectedActionIds.includes(node.id)
+        ) || [];
+      }
+    }
+
+    console.log(`✅ Test result: trigger ${triggerMatches ? 'MATCHED' : 'NOT MATCHED'}, ${actions.length} actions would execute`);
+
+    res.json({
+      success: true,
+      workflowId,
+      workflow: {
+        id: workflowData.id,
+        name: workflowData.name,
+        description: workflowData.description,
+        is_active: workflowData.is_active,
+        target_url: workflowData.target_url
+      },
+      triggerNode: triggerNode || null,
+      triggerMatches,
+      triggerResult,
+      actions,
+      eventData,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Test workflow error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to test workflow',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Main scraping endpoint
 app.post('/api/scrape', async (req, res) => {
   try {
