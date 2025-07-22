@@ -190,6 +190,14 @@ app.get('/api/unified-workflow-system.js', (req, res) => {
   
   ${unifiedWorkflow}
   
+  // Export classes to global scope after loading
+  if (typeof ElementEventTracker !== 'undefined') {
+    window.ElementEventTracker = ElementEventTracker;
+  }
+  if (typeof UnifiedWorkflowSystem !== 'undefined') {
+    window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
+  }
+  
   // Auto-initialize after scripts load
   document.addEventListener('DOMContentLoaded', function() {
     console.log('🎯 TrackFlow: DOM loaded, initializing system...');
