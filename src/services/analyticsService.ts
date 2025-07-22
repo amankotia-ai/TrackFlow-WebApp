@@ -22,6 +22,26 @@ export interface AnalyticsEvent {
   created_at: string
 }
 
+export interface ComprehensiveAnalytics {
+  total_visitors: number
+  total_pageviews: number
+  total_sessions: number
+  total_conversions: number
+  conversion_rate: number
+  top_pages: Array<{page_url: string, visits: number}>
+  top_utm_sources: Array<{utm_source: string, visits: number}>
+  device_breakdown: Array<{device_type: string, count: number}>
+  daily_stats: Array<{date: string, visitors: number, pageviews: number, conversions: number}>
+}
+
+export interface WorkflowMapping {
+  workflow_id: string
+  user_id: string
+  workflow_name: string
+  target_url: string
+  match_type: string
+}
+
 export interface WorkflowExecution {
   id: string
   workflow_id: string
@@ -132,6 +152,88 @@ export class AnalyticsService {
     
     console.log(`✅ Loaded ${response.data?.length || 0} executions`);
     return response.data || [];
+  }
+
+  /**
+   * Get comprehensive analytics for the user
+   */
+  static async getComprehensiveAnalytics(days: number = 30): Promise<ApiResponse<ComprehensiveAnalytics>> {
+    console.log(`📊 Loading comprehensive analytics for last ${days} days...`);
+    
+    try {
+      const response = await fetch(`/api/analytics/comprehensive?days=${days}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fetch comprehensive analytics');
+      }
+      
+      console.log('✅ Comprehensive analytics loaded successfully');
+      return {
+        success: true,
+        data: result.data,
+        timestamp: new Date().toISOString(),
+      };
+      
+    } catch (error: any) {
+      console.error('❌ Error loading comprehensive analytics:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to load comprehensive analytics',
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Get workflow mappings for a specific page URL
+   */
+  static async getWorkflowMappings(pageUrl: string): Promise<ApiResponse<WorkflowMapping[]>> {
+    console.log(`📊 Finding workflow mappings for page: ${pageUrl}`);
+    
+    try {
+      const response = await fetch(`/api/analytics/workflow-mappings?page_url=${encodeURIComponent(pageUrl)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fetch workflow mappings');
+      }
+      
+      console.log(`✅ Found ${result.count} workflow mappings for page`);
+      return {
+        success: true,
+        data: result.matching_workflows,
+        timestamp: new Date().toISOString(),
+      };
+      
+    } catch (error: any) {
+      console.error('❌ Error loading workflow mappings:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to load workflow mappings',
+        timestamp: new Date().toISOString(),
+      };
+    }
   }
 
   /**

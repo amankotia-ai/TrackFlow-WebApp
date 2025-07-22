@@ -582,34 +582,58 @@ class ApiClient {
         };
       }
       
-      // Simple aggregation queries instead of complex RPC
-      const [workflowsResult, executionsResult] = await Promise.all([
-        supabase
-          .from('workflows')
-          .select('id, is_active, executions')
-          .eq('user_id', user.id),
-        supabase
-          .from('workflow_executions')
-          .select('status')
-          .eq('user_id', user.id)
-      ]);
-      
-      if (workflowsResult.error) {
+      // Get user's workflows first
+      const { data: userWorkflows, error: workflowError } = await supabase
+        .from('workflows')
+        .select('id, is_active')
+        .eq('user_id', user.id);
+
+      if (workflowError) {
         return {
           success: false,
-          error: workflowsResult.error.message,
+          error: workflowError.message,
           timestamp: new Date().toISOString(),
         };
       }
+
+      const workflows = userWorkflows || [];
+      const userWorkflowIds = workflows.map(w => w.id);
+
+      if (userWorkflowIds.length === 0) {
+        return {
+          success: true,
+          data: {
+            total_workflows: 0,
+            active_workflows: 0,
+            total_executions: 0,
+            total_events: 0,
+            avg_success_rate: 0,
+          },
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Get ALL execution data for user's workflows (including anonymous executions)
+      // This is the key fix - we query by workflow_id (which the user owns) rather than user_id
+      const [executionsResult, eventsResult] = await Promise.all([
+        supabase
+          .from('workflow_executions')
+          .select('status')
+          .in('workflow_id', userWorkflowIds), // Query by workflow ownership, not execution user_id
+        supabase
+          .from('analytics_events')
+          .select('id')
+          .in('workflow_id', userWorkflowIds) // Query by workflow ownership
+      ]);
       
-      const workflows = workflowsResult.data || [];
       const executions = executionsResult.data || [];
+      const events = eventsResult.data || [];
       
       const stats = {
         total_workflows: workflows.length,
         active_workflows: workflows.filter(w => w.is_active).length,
-        total_executions: workflows.reduce((sum, w) => sum + (w.executions || 0), 0),
-        total_events: executions.length,
+        total_executions: executions.length, // Now includes all executions for user's workflows
+        total_events: events.length, // Now includes all events for user's workflows
         avg_success_rate: executions.length > 0 
           ? (executions.filter(e => e.status === 'success').length / executions.length) * 100 
           : 0,
@@ -621,7 +645,7 @@ class ApiClient {
         timestamp: new Date().toISOString(),
       };
       
-    } catch (error) {
+    } catch (error: any) {
       return {
         success: false,
         error: error.message || 'Failed to load user stats',
@@ -645,32 +669,91 @@ class ApiClient {
         };
       }
       
-      let query = supabase
-        .from('workflow_executions')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('executed_at', { ascending: false })
-        .limit(limit);
-      
+      // If a specific workflow is requested, verify the user owns it
       if (workflowId) {
-        query = query.eq('workflow_id', workflowId);
-      }
-      
-      const { data, error } = await query;
-      
-      if (error) {
+        const { data: workflow, error: workflowError } = await supabase
+          .from('workflows')
+          .select('id')
+          .eq('id', workflowId)
+          .eq('user_id', user.id)
+          .single();
+          
+        if (workflowError || !workflow) {
+          return {
+            success: false,
+            error: 'Workflow not found or access denied',
+            timestamp: new Date().toISOString(),
+          };
+        }
+        
+        // Get all executions for this specific workflow (including anonymous)
+        const { data, error } = await supabase
+          .from('workflow_executions')
+          .select('*')
+          .eq('workflow_id', workflowId)
+          .order('executed_at', { ascending: false })
+          .limit(limit);
+        
+        if (error) {
+          return {
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          };
+        }
+        
         return {
-          success: false,
-          error: error.message,
+          success: true,
+          data: data || [],
+          timestamp: new Date().toISOString(),
+        };
+      } else {
+        // Get all of user's workflows first
+        const { data: userWorkflows, error: workflowError } = await supabase
+          .from('workflows')
+          .select('id')
+          .eq('user_id', user.id);
+          
+        if (workflowError) {
+          return {
+            success: false,
+            error: workflowError.message,
+            timestamp: new Date().toISOString(),
+          };
+        }
+        
+        const userWorkflowIds = userWorkflows?.map(w => w.id) || [];
+        
+        if (userWorkflowIds.length === 0) {
+          return {
+            success: true,
+            data: [],
+            timestamp: new Date().toISOString(),
+          };
+        }
+        
+        // Get all executions for user's workflows (including anonymous executions)
+        const { data, error } = await supabase
+          .from('workflow_executions')
+          .select('*')
+          .in('workflow_id', userWorkflowIds) // Query by workflow ownership
+          .order('executed_at', { ascending: false })
+          .limit(limit);
+        
+        if (error) {
+          return {
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          };
+        }
+        
+        return {
+          success: true,
+          data: data || [],
           timestamp: new Date().toISOString(),
         };
       }
-      
-      return {
-        success: true,
-        data: data || [],
-        timestamp: new Date().toISOString(),
-      };
       
     } catch (error) {
       return {
@@ -942,6 +1025,309 @@ class ApiClient {
       return {
         success: false,
         error: error.message || 'Failed to load page analytics summary',
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Get detailed action tracking data with individual action performance
+   */
+  async getActionTrackingData(workflowId?: string, days: number = 30): Promise<ApiResponse> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        return {
+          success: false,
+          error: 'User not authenticated',
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Get user's workflows
+      const { data: userWorkflows, error: workflowError } = await supabase
+        .from('workflows')
+        .select('id, name')
+        .eq('user_id', user.id);
+
+      if (workflowError) {
+        return {
+          success: false,
+          error: workflowError.message,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      const userWorkflowIds = userWorkflows?.map(w => w.id) || [];
+
+      if (userWorkflowIds.length === 0) {
+        return {
+          success: true,
+          data: [],
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Get action execution events from analytics_events where event_type = 'action_executed'
+      let query = supabase
+        .from('analytics_events')
+        .select(`
+          id,
+          workflow_id,
+          workflow_execution_id,
+          session_id,
+          event_type,
+          element_selector,
+          element_text,
+          page_url,
+          page_title,
+          device_type,
+          user_agent,
+          event_data,
+          created_at
+        `)
+        .in('workflow_id', userWorkflowIds)
+        .eq('event_type', 'action_executed')
+        .gte('created_at', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
+        .order('created_at', { ascending: false });
+
+      if (workflowId) {
+        query = query.eq('workflow_id', workflowId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        return {
+          success: false,
+          error: error.message,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      console.log(`✅ Loaded ${data?.length || 0} action tracking events`);
+      return {
+        success: true,
+        data: data || [],
+        timestamp: new Date().toISOString(),
+      };
+
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to load action tracking data',
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Get detailed user interaction events (clicks, hovers, scrolls, form submissions, etc.)
+   */
+  async getUserInteractionEvents(workflowId?: string, days: number = 30): Promise<ApiResponse> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        return {
+          success: false,
+          error: 'User not authenticated',
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Get user's workflows
+      const { data: userWorkflows, error: workflowError } = await supabase
+        .from('workflows')
+        .select('id, name')
+        .eq('user_id', user.id);
+
+      if (workflowError) {
+        return {
+          success: false,
+          error: workflowError.message,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      const userWorkflowIds = userWorkflows?.map(w => w.id) || [];
+
+      if (userWorkflowIds.length === 0) {
+        return {
+          success: true,
+          data: [],
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Get all user interaction events (excluding action_executed)
+      let query = supabase
+        .from('analytics_events')
+        .select(`
+          id,
+          workflow_id,
+          workflow_execution_id,
+          session_id,
+          event_type,
+          element_selector,
+          element_text,
+          element_attributes,
+          page_url,
+          page_title,
+          referrer_url,
+          device_type,
+          browser_info,
+          user_agent,
+          viewport_size,
+          screen_size,
+          event_data,
+          created_at
+        `)
+        .in('workflow_id', userWorkflowIds)
+        .neq('event_type', 'action_executed') // Exclude action tracking events
+        .gte('created_at', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(500); // Limit to prevent overwhelming response
+
+      if (workflowId) {
+        query = query.eq('workflow_id', workflowId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        return {
+          success: false,
+          error: error.message,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      console.log(`✅ Loaded ${data?.length || 0} user interaction events`);
+      return {
+        success: true,
+        data: data || [],
+        timestamp: new Date().toISOString(),
+      };
+
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to load user interaction events',
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Get detailed workflow execution data with associated actions
+   */
+  async getDetailedWorkflowExecutions(workflowId?: string, days: number = 30): Promise<ApiResponse> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        return {
+          success: false,
+          error: 'User not authenticated',
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Get user's workflows
+      const { data: userWorkflows, error: workflowError } = await supabase
+        .from('workflows')
+        .select('id, name')
+        .eq('user_id', user.id);
+
+      if (workflowError) {
+        return {
+          success: false,
+          error: workflowError.message,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      const userWorkflowIds = userWorkflows?.map(w => w.id) || [];
+
+      if (userWorkflowIds.length === 0) {
+        return {
+          success: true,
+          data: [],
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Get detailed workflow executions
+      let executionQuery = supabase
+        .from('workflow_executions')
+        .select(`
+          id,
+          workflow_id,
+          user_id,
+          status,
+          execution_time_ms,
+          error_message,
+          page_url,
+          user_agent,
+          session_id,
+          executed_at
+        `)
+        .in('workflow_id', userWorkflowIds)
+        .gte('executed_at', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
+        .order('executed_at', { ascending: false })
+        .limit(200);
+
+      if (workflowId) {
+        executionQuery = executionQuery.eq('workflow_id', workflowId);
+      }
+
+      const { data: executions, error: executionError } = await executionQuery;
+
+      if (executionError) {
+        return {
+          success: false,
+          error: executionError.message,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // For each execution, get associated action events
+      const executionsWithActions = await Promise.all(
+        (executions || []).map(async (execution) => {
+          const { data: actions } = await supabase
+            .from('analytics_events')
+            .select(`
+              id,
+              event_type,
+              element_selector,
+              element_text,
+              event_data,
+              created_at
+            `)
+            .eq('workflow_execution_id', execution.id)
+            .eq('event_type', 'action_executed')
+            .order('created_at', { ascending: true });
+
+          return {
+            ...execution,
+            actions: actions || []
+          };
+        })
+      );
+
+      console.log(`✅ Loaded ${executionsWithActions.length} detailed executions with actions`);
+      return {
+        success: true,
+        data: executionsWithActions,
+        timestamp: new Date().toISOString(),
+      };
+
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to load detailed workflow executions',
         timestamp: new Date().toISOString(),
       };
     }

@@ -8,6 +8,12 @@
   
   class WorkflowExecutor {
     constructor(config = {}) {
+      // Prevent conflicts with unified workflow system
+      if (window.DISABLE_LEGACY_WORKFLOWS && window.workflowSystem) {
+        console.log('🎯 Workflow Executor: Unified system is active, skipping legacy initialization');
+        return;
+      }
+
       this.config = {
         apiEndpoint: 'https://trackflow-webapp-production.up.railway.app',
         debug: true,
@@ -565,6 +571,28 @@
         console.error('⚠️ Redirect action: Invalid or missing URL');
         return;
       }
+
+      // Prevent redirect loops - check if we're redirecting to the same page
+      const currentUrl = window.location.href;
+      const targetUrl = new URL(config.url, window.location.origin).href;
+      
+      if (currentUrl === targetUrl) {
+        console.warn('⚠️ Redirect action: Prevented redirect to same page to avoid infinite loop');
+        return;
+      }
+
+      // Check if we've already redirected recently (within last 10 seconds)
+      const redirectKey = `redirect_${targetUrl}`;
+      const lastRedirectTime = sessionStorage.getItem(redirectKey);
+      const now = Date.now();
+      
+      if (lastRedirectTime && (now - parseInt(lastRedirectTime)) < 10000) {
+        console.warn('⚠️ Redirect action: Prevented rapid consecutive redirects to prevent loop');
+        return;
+      }
+
+      // Store redirect timestamp
+      sessionStorage.setItem(redirectKey, now.toString());
 
       const delay = (config.delay || 0) * 1000; // Convert seconds to milliseconds
       

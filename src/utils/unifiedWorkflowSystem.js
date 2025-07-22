@@ -1058,6 +1058,28 @@
         return { success: false, error: 'Invalid or missing URL' };
       }
 
+      // Prevent redirect loops - check if we're redirecting to the same page
+      const currentUrl = window.location.href;
+      const targetUrl = new URL(config.url, window.location.origin).href;
+      
+      if (currentUrl === targetUrl) {
+        this.log('⚠️ Redirect action: Prevented redirect to same page to avoid infinite loop', 'warning');
+        return { success: false, error: 'Same page redirect prevented' };
+      }
+
+      // Check if we've already redirected recently (within last 10 seconds)
+      const redirectKey = `redirect_${targetUrl}`;
+      const lastRedirectTime = sessionStorage.getItem(redirectKey);
+      const now = Date.now();
+      
+      if (lastRedirectTime && (now - parseInt(lastRedirectTime)) < 10000) {
+        this.log('⚠️ Redirect action: Prevented rapid consecutive redirects to prevent loop', 'warning');
+        return { success: false, error: 'Rapid redirect prevented' };
+      }
+
+      // Store redirect timestamp
+      sessionStorage.setItem(redirectKey, now.toString());
+
       const delay = (config.delay || 0) * 1000; // Convert seconds to milliseconds
       
       this.log(`🔄 Redirect scheduled: ${config.url} (delay: ${config.delay || 0}s, newTab: ${config.newTab || false})`);
@@ -1410,11 +1432,18 @@
   // Global API
   window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
 
+  // Prevent multiple instances and conflicts with legacy systems
+  if (window.workflowSystem) {
+    console.log('🎯 Unified Workflow System: Instance already exists, skipping initialization');
+    return;
+  }
+
   // Auto-initialize if not already done and not disabled
-  if (!window.workflowSystem && !window.DISABLE_LEGACY_WORKFLOWS) {
+  if (!window.DISABLE_LEGACY_WORKFLOWS) {
     // Disable other workflow systems to prevent conflicts
     window.DISABLE_LEGACY_WORKFLOWS = true;
     
+    console.log('🎯 Unified Workflow System: Initializing new instance...');
     window.workflowSystem = new UnifiedWorkflowSystem();
     
     // Track initialization state
