@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manks Webflow Test - TrackFlow Debug</title>
+  
+  <!-- Anti-flicker script first -->
+  <script src="https://trackflow-webapp-production.up.railway.app/api/anti-flicker.js"></script>
+  
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    
+    .debug-panel {
+      background: #f0f0f0;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 2rem;
+      border-left: 4px solid #007bff;
+    }
+    
+    .status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    
+    .status.loading { background: #fff3cd; color: #856404; }
+    .status.success { background: #d4edda; color: #155724; }
+    .status.error { background: #f8d7da; color: #721c24; }
+    
+    .log {
+      background: #000;
+      color: #0f0;
+      padding: 1rem;
+      border-radius: 4px;
+      font-family: monospace;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    
+    h1 {
+      color: #333;
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+    }
+    
+    .hero-headline {
+      color: #007bff;
+      font-size: 2rem;
+      margin: 1rem 0;
+    }
+    
+    .headline {
+      color: #6c757d;
+      font-size: 1.5rem;
+      margin: 1rem 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="debug-panel">
+    <h2>🎯 TrackFlow Debug - Manks Webflow Test</h2>
+    <p><strong>Current URL:</strong> <span id="current-url"></span></p>
+    <p><strong>UTM Source:</strong> <span id="utm-source"></span></p>
+    <p><strong>Expected Behavior:</strong> Headlines should change to "Welcome from Google! Special offer inside."</p>
+    
+    <div class="status loading" id="status">⏳ Loading...</div>
+    <button onclick="testWorkflow()">🧪 Test Workflow Manually</button>
+    <button onclick="clearLog()">🗑️ Clear Log</button>
+  </div>
+
+  <!-- Test content that should be modified -->
+  <h1 id="main-title">Original Main Title</h1>
+  <div class="hero-headline">Original Hero Headline</div>
+  <div class="headline">Original Headline</div>
+  
+  <div style="margin-top: 2rem;">
+    <h3>📊 Debug Log</h3>
+    <div class="log" id="debug-log"></div>
+  </div>
+
+  <!-- Load the unified workflow system -->
+  <script src="https://trackflow-webapp-production.up.railway.app/api/unified-workflow-system.js"></script>
+  
+  <script>
+    // Debug helper functions
+    function log(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const logElement = document.getElementById('debug-log');
+      const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : '📋';
+      logElement.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+      logElement.scrollTop = logElement.scrollHeight;
+      console.log(`[TrackFlow Debug] ${message}`);
+    }
+    
+    function updateStatus(message, type = 'loading') {
+      const statusElement = document.getElementById('status');
+      statusElement.textContent = message;
+      statusElement.className = `status ${type}`;
+    }
+    
+    function clearLog() {
+      document.getElementById('debug-log').textContent = '';
+    }
+    
+    function testWorkflow() {
+      log('Manual workflow test triggered');
+      if (window.workflowSystem) {
+        log('WorkflowSystem available, simulating Google UTM trigger');
+        window.workflowSystem.handleEvent({
+          eventType: 'page_load',
+          utm: { utm_source: 'google' },
+          deviceType: 'desktop'
+        });
+      } else {
+        log('WorkflowSystem not available', 'error');
+      }
+    }
+    
+    // Initialize debug info
+    document.addEventListener('DOMContentLoaded', function() {
+      // Update URL info
+      const url = new URL(window.location.href);
+      document.getElementById('current-url').textContent = window.location.href;
+      document.getElementById('utm-source').textContent = url.searchParams.get('utm_source') || 'none';
+      
+      log('Page loaded, checking workflow system...');
+      
+      // Check for workflow system
+      let checkCount = 0;
+      const checkSystem = setInterval(() => {
+        checkCount++;
+        
+        if (window.workflowSystem) {
+          clearInterval(checkSystem);
+          log('✅ WorkflowSystem found!', 'success');
+          log(`Workflows loaded: ${window.workflowSystem.workflows?.size || 0}`);
+          updateStatus('✅ WorkflowSystem Ready', 'success');
+          
+          // Check if workflows were fetched
+          if (window.workflowSystem.workflows?.size > 0) {
+            log(`Found ${window.workflowSystem.workflows.size} workflows`);
+            window.workflowSystem.workflows.forEach((workflow, id) => {
+              log(`- ${workflow.name} (${id})`);
+            });
+          } else {
+            log('No workflows loaded', 'error');
+          }
+          
+        } else if (checkCount > 20) {
+          clearInterval(checkSystem);
+          log('❌ WorkflowSystem not found after 10 seconds', 'error');
+          updateStatus('❌ WorkflowSystem Failed', 'error');
+        }
+      }, 500);
+    });
+    
+    // Listen for workflow system events
+    window.addEventListener('workflowSystemReady', function(event) {
+      log('WorkflowSystem ready event received', 'success');
+    });
+    
+    window.addEventListener('unifiedWorkflowSystemReady', function(event) {
+      log('UnifiedWorkflowSystem ready event received', 'success');
+    });
+    
+    // Monitor for text changes
+    const observer = new MutationObserver(function(mutations) {
+      mutations.forEach(function(mutation) {
+        if (mutation.type === 'childList' || mutation.type === 'characterData') {
+          const target = mutation.target;
+          if (target.tagName && ['H1', 'DIV'].includes(target.tagName)) {
+            log(`Text change detected in ${target.tagName}: "${target.textContent}"`, 'success');
+          }
+        }
+      });
+    });
+    
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+    
+    // Add UTM parameter if not present (for testing)
+    if (!window.location.search.includes('utm_source=google')) {
+      log('Adding utm_source=google to URL for testing');
+      const newUrl = window.location.href + (window.location.search ? '&' : '?') + 'utm_source=google';
+      window.history.replaceState({}, '', newUrl);
+      document.getElementById('current-url').textContent = newUrl;
+      document.getElementById('utm-source').textContent = 'google';
+    }
+  </script>
+</body>
+</html> 

@@ -65,6 +65,12 @@
 
     async initializeWorkflowSystem() {
       try {
+        // Skip workflow system initialization if legacy workflows are disabled
+        if (window.DISABLE_LEGACY_WORKFLOWS) {
+          console.log('🎯 Enhanced Element Tracker: Legacy workflows disabled, skipping WorkflowExecutor initialization');
+          return;
+        }
+        
         // Load workflow executor if not already loaded
         if (!window.WorkflowExecutor) {
           console.log('🎯 Loading workflow executor...');

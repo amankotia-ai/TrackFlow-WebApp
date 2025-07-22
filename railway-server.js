@@ -165,8 +165,7 @@ app.get('/api/test-unified-system', (req, res) => {
 // Serve unified workflow system endpoint
 app.get('/api/unified-workflow-system.js', (req, res) => {
   try {
-    // Read both tracking and workflow files
-    const elementTracker = fs.readFileSync(path.join(__dirname, 'src/utils/elementTracker.js'), 'utf8');
+    // Read workflow file only - don't include elementTracker to prevent conflicts
     const unifiedWorkflow = fs.readFileSync(path.join(__dirname, 'src/utils/unifiedWorkflowSystem.js'), 'utf8');
     
     // Combine them into one script with minimal wrapper
@@ -189,42 +188,36 @@ app.get('/api/unified-workflow-system.js', (req, res) => {
   // Disable legacy systems BEFORE loading scripts to prevent conflicts
   window.DISABLE_LEGACY_WORKFLOWS = true;
   
-  // Load ElementEventTracker first
-  ${elementTracker}
+  // Prevent elementTracker auto-initialization to avoid conflicts
+  window.DISABLE_ELEMENT_TRACKER_AUTO_INIT = true;
   
-  // Load UnifiedWorkflowSystem second
+  // Load UnifiedWorkflowSystem (this handles everything including analytics)
   ${unifiedWorkflow}
   
   // Export classes to global scope after loading
-  if (typeof ElementEventTracker !== 'undefined') {
-    window.ElementEventTracker = ElementEventTracker;
-    console.log('✅ TrackFlow: ElementEventTracker exported to global scope');
-  }
   if (typeof UnifiedWorkflowSystem !== 'undefined') {
     window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
     console.log('✅ TrackFlow: UnifiedWorkflowSystem exported to global scope');
   }
   
-  // Let the unifiedWorkflowSystem.js handle its own initialization
-  // (No duplicate DOMContentLoaded listeners)
-  console.log('🎯 TrackFlow: Scripts loaded, initialization will be handled by unifiedWorkflowSystem.js');
+  // The unifiedWorkflowSystem.js handles its own initialization automatically
+  console.log('🎯 TrackFlow: Unified script loaded, initialization handled by UnifiedWorkflowSystem');
   
 })();
-`;
+    `;
     
-    // Set proper headers
-    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Content-Type', 'application/javascript');
+    res.setHeader('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes in production
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     
-    console.log('📦 Serving unified workflow system to:', req.get('origin') || req.ip);
+    console.log('📦 Serving unified workflow system script (conflict-free version)');
     res.send(unifiedScript);
     
   } catch (error) {
-    console.error('❌ Error serving unified workflow system:', error);
-    res.status(500).json({ error: 'Failed to load unified workflow system' });
+    console.error('❌ Error serving unified workflow system script:', error);
+    res.status(500).json({ error: 'Failed to load unified workflow system script' });
   }
 });
 

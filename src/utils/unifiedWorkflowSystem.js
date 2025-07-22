@@ -1782,8 +1782,12 @@
   // Prevent multiple instances and conflicts with legacy systems
   if (window.workflowSystem && window.workflowSystem.initialized) {
     console.log('🎯 Unified Workflow System: Instance already exists and initialized, skipping initialization');
-  } else if (window.DISABLE_LEGACY_WORKFLOWS && window.workflowSystem) {
-    console.log('🎯 Unified Workflow System: Instance exists but not initialized, will initialize');
+    return; // Exit early to prevent any further initialization
+  } else if (window.workflowSystem && !window.workflowSystem.initialized) {
+    console.log('🎯 Unified Workflow System: Instance exists but not initialized, will initialize existing instance');
+  } else if (window.workflowExecutor && !window.DISABLE_LEGACY_WORKFLOWS) {
+    console.log('🎯 Unified Workflow System: Legacy WorkflowExecutor detected, setting disable flag and proceeding');
+    window.DISABLE_LEGACY_WORKFLOWS = true;
   } else {
     // Auto-initialize only if not explicitly disabled and no existing functional instance
     if (!window.DISABLE_LEGACY_WORKFLOWS) {

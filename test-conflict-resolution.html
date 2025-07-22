@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow System Conflict Resolution Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-good { background: #28a745; }
+        .status-warning { background: #ffc107; }
+        .status-error { background: #dc3545; }
+        .console-log {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .test-elements {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .test-element {
+            padding: 15px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            text-align: center;
+            background: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 Workflow System Conflict Resolution Test</h1>
+    
+    <div class="test-container">
+        <h2>📊 System Status</h2>
+        <div id="system-status">
+            <p><span class="status-indicator" id="unified-status"></span><strong>Unified Workflow System:</strong> <span id="unified-text">Checking...</span></p>
+            <p><span class="status-indicator" id="legacy-status"></span><strong>Legacy Systems:</strong> <span id="legacy-text">Checking...</span></p>
+            <p><span class="status-indicator" id="conflict-status"></span><strong>Conflicts Detected:</strong> <span id="conflict-text">Checking...</span></p>
+            <p><span class="status-indicator" id="initialization-status"></span><strong>Initialization:</strong> <span id="initialization-text">Checking...</span></p>
+        </div>
+    </div>
+
+    <div class="test-container">
+        <h2>🧪 Test Actions</h2>
+        <button onclick="testWorkflowTrigger()">Test Workflow Trigger</button>
+        <button onclick="testElementTracking()">Test Element Tracking</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+        <button onclick="refreshStatus()">Refresh Status</button>
+    </div>
+
+    <div class="test-container">
+        <h2>🎯 Test Elements (for workflow actions)</h2>
+        <div class="test-elements">
+            <div class="test-element">
+                <button class="test-button" id="test-btn-1">Test Button 1</button>
+                <p>Original text that can be replaced</p>
+            </div>
+            <div class="test-element">
+                <button class="test-button" id="test-btn-2">Test Button 2</button>
+                <p class="replaceable-text">This text can be modified</p>
+            </div>
+            <div class="test-element">
+                <a href="#" class="test-link">Test Link</a>
+                <div class="hideable-element">This can be hidden</div>
+            </div>
+            <div class="test-element">
+                <input type="text" placeholder="Test input" class="test-input">
+                <span class="modifiable-content">Modifiable content</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-container">
+        <h2>📝 Console Output</h2>
+        <div id="console-output" class="console-log">
+            Console logs will appear here...
+        </div>
+    </div>
+
+    <!-- Load the unified workflow system -->
+    <script src="https://trackflow-webapp-production.up.railway.app/api/unified-workflow-system.js"></script>
+
+    <script>
+        // Capture console logs
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        
+        let logs = [];
+        
+        function captureLog(level, args) {
+            const timestamp = new Date().toLocaleTimeString();
+            const message = Array.from(args).map(arg => 
+                typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+            ).join(' ');
+            
+            logs.push(`[${timestamp}] ${level.toUpperCase()}: ${message}`);
+            updateConsoleOutput();
+        }
+        
+        console.log = function(...args) {
+            originalConsoleLog.apply(console, args);
+            captureLog('log', args);
+        };
+        
+        console.error = function(...args) {
+            originalConsoleError.apply(console, args);
+            captureLog('error', args);
+        };
+        
+        console.warn = function(...args) {
+            originalConsoleWarn.apply(console, args);
+            captureLog('warn', args);
+        };
+        
+        function updateConsoleOutput() {
+            const output = document.getElementById('console-output');
+            output.textContent = logs.slice(-50).join('\n'); // Show last 50 logs
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function clearLogs() {
+            logs = [];
+            updateConsoleOutput();
+        }
+        
+        function setStatus(elementId, status, text) {
+            const indicator = document.getElementById(elementId);
+            const textElement = document.getElementById(elementId.replace('-status', '-text'));
+            
+            indicator.className = `status-indicator status-${status}`;
+            textElement.textContent = text;
+        }
+        
+        function checkSystemStatus() {
+            console.log('🔍 Checking system status...');
+            
+            // Check unified system
+            if (window.workflowSystem && window.workflowSystem.initialized) {
+                setStatus('unified-status', 'good', 'Initialized and Ready');
+            } else if (window.workflowSystem) {
+                setStatus('unified-status', 'warning', 'Instance exists but not initialized');
+            } else {
+                setStatus('unified-status', 'error', 'Not found');
+            }
+            
+            // Check legacy systems
+            const legacySystems = [];
+            if (window.workflowExecutor) legacySystems.push('WorkflowExecutor');
+            if (window.elementTracker) legacySystems.push('ElementTracker');
+            
+            if (legacySystems.length === 0) {
+                setStatus('legacy-status', 'good', 'No legacy systems detected');
+            } else if (window.DISABLE_LEGACY_WORKFLOWS) {
+                setStatus('legacy-status', 'warning', `Found but disabled: ${legacySystems.join(', ')}`);
+            } else {
+                setStatus('legacy-status', 'error', `Active: ${legacySystems.join(', ')}`);
+            }
+            
+            // Check for conflicts
+            const activeWorkflowSystems = [];
+            if (window.workflowSystem && window.workflowSystem.initialized) activeWorkflowSystems.push('Unified');
+            if (window.workflowExecutor && !window.DISABLE_LEGACY_WORKFLOWS) activeWorkflowSystems.push('Legacy');
+            
+            if (activeWorkflowSystems.length > 1) {
+                setStatus('conflict-status', 'error', `Multiple systems active: ${activeWorkflowSystems.join(', ')}`);
+            } else if (activeWorkflowSystems.length === 1) {
+                setStatus('conflict-status', 'good', 'No conflicts detected');
+            } else {
+                setStatus('conflict-status', 'warning', 'No active workflow systems');
+            }
+            
+            // Check initialization status
+            if (window.workflowSystem && window.workflowSystem.initialized) {
+                const workflowCount = window.workflowSystem.workflows ? window.workflowSystem.workflows.size : 0;
+                setStatus('initialization-status', 'good', `Complete - ${workflowCount} workflows loaded`);
+            } else {
+                setStatus('initialization-status', 'warning', 'Not initialized');
+            }
+            
+            // Log detailed status
+            console.log('📊 System Status Report:', {
+                unifiedSystem: window.workflowSystem ? 'Found' : 'Not found',
+                unifiedInitialized: window.workflowSystem?.initialized || false,
+                legacyWorkflowExecutor: window.workflowExecutor ? 'Found' : 'Not found',
+                legacyElementTracker: window.elementTracker ? 'Found' : 'Not found',
+                disableLegacyFlag: window.DISABLE_LEGACY_WORKFLOWS || false,
+                workflowCount: window.workflowSystem?.workflows?.size || 0
+            });
+        }
+        
+        function refreshStatus() {
+            checkSystemStatus();
+        }
+        
+        function testWorkflowTrigger() {
+            console.log('🧪 Testing workflow trigger...');
+            
+            if (window.workflowSystem && typeof window.workflowSystem.handleEvent === 'function') {
+                window.workflowSystem.handleEvent({
+                    eventType: 'click',
+                    elementSelector: '.test-button',
+                    timestamp: Date.now()
+                });
+                console.log('✅ Workflow trigger test sent');
+            } else {
+                console.log('❌ Unified workflow system not available for testing');
+            }
+        }
+        
+        function testElementTracking() {
+            console.log('🧪 Testing element tracking...');
+            
+            // Simulate click on test button
+            const testButton = document.getElementById('test-btn-1');
+            if (testButton) {
+                testButton.click();
+                console.log('✅ Simulated click on test button');
+            }
+        }
+        
+        // Wait for system to initialize
+        setTimeout(() => {
+            checkSystemStatus();
+        }, 2000);
+        
+        // Check status every 5 seconds
+        setInterval(checkSystemStatus, 5000);
+        
+        // Listen for system ready events
+        window.addEventListener('unifiedWorkflowSystemReady', (event) => {
+            console.log('🎉 Unified Workflow System Ready event received:', event.detail);
+            setTimeout(checkSystemStatus, 500);
+        });
+        
+        console.log('🔧 Conflict resolution test page loaded');
+    </script>
+</body>
+</html> 

@@ -518,7 +518,7 @@
   window.ElementTracker = ElementEventTracker;
 
   // Auto-initialize with default settings if not already initialized and not disabled
-  if (!window.elementTracker && !window.DISABLE_LEGACY_WORKFLOWS) {
+  if (!window.elementTracker && !window.DISABLE_LEGACY_WORKFLOWS && !window.DISABLE_ELEMENT_TRACKER_AUTO_INIT) {
     window.elementTracker = new ElementEventTracker();
     
     // Auto-track common elements
