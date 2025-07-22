@@ -1039,7 +1039,7 @@
     const instance = new WorkflowExecutor();
     
     // Only proceed if instance was created successfully (not null)
-    if (instance && !instance.isLegacySystem === false) {
+    if (instance && instance.isLegacySystem) {
       window.workflowExecutor = instance;
       
       // Initialize after DOM is ready
