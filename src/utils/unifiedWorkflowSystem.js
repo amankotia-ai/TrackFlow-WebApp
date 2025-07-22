@@ -256,7 +256,13 @@
           return;
         }
         
-        // Start observing
+        // Validate that we have a valid MutationObserver and body
+        if (!this.mutationObserver || typeof this.mutationObserver.observe !== 'function') {
+          this.log('Invalid MutationObserver instance', 'error');
+          return;
+        }
+        
+        // Start observing with proper validation
         this.mutationObserver.observe(document.body, { 
           childList: true, 
           subtree: true 
@@ -1492,12 +1498,20 @@
     }
   }
 
-  // Global API
-  window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
+  // Global API - Make sure it's available immediately
+  if (typeof window !== 'undefined') {
+    window.UnifiedWorkflowSystem = UnifiedWorkflowSystem;
+  }
 
   // Prevent multiple instances and conflicts with legacy systems
   if (window.workflowSystem) {
     console.log('🎯 Unified Workflow System: Instance already exists, skipping initialization');
+    return;
+  }
+
+  // Validate that UnifiedWorkflowSystem is available before proceeding
+  if (typeof UnifiedWorkflowSystem === 'undefined') {
+    console.error('❌ UnifiedWorkflowSystem class not available during initialization');
     return;
   }
 
@@ -1579,19 +1593,30 @@
     if (document.readyState === 'loading') {
       // Use requestIdleCallback with timeout for priority if available
       if (window.requestIdleCallback) {
-        requestIdleCallback(() => priorityInit(), { timeout: 500 });
+        requestIdleCallback(() => priorityInit().catch(console.error), { timeout: 500 });
       } else {
-        setTimeout(priorityInit, 0);
+        setTimeout(() => priorityInit().catch(console.error), 0);
       }
       
       // Full initialization on DOMContentLoaded
       document.addEventListener('DOMContentLoaded', () => {
-        fullInit();
+        fullInit().catch(console.error);
       }, { once: true });
     } else {
       // Document already loaded - run priority init then full init
-      priorityInit().then(() => fullInit());
+      priorityInit().then(() => fullInit()).catch(console.error);
     }
+    
+    // Safety timeout to ensure content is shown even if everything fails
+    setTimeout(() => {
+      if (!fullInitComplete) {
+        console.warn('🎯 Unified Workflow System: Safety timeout reached, showing content');
+        if (document.body && document.body.style.visibility === 'hidden') {
+          document.body.style.visibility = 'visible';
+          document.body.style.opacity = '1';
+        }
+      }
+    }, 10000); // 10 second safety timeout
   }
   
   // Export UnifiedWorkflowSystem to global scope
