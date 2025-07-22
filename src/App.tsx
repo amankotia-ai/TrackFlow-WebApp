@@ -193,6 +193,8 @@ function AuthenticatedApp() {
         return <Templates templates={templates} onTemplateUse={handleWorkflowSelect} />;
       case 'analytics':
         return <Analytics workflows={workflows} />;
+      case 'executions':
+        return <Analytics workflows={workflows} />;
       case 'api-keys':
         return <ApiKeyManager />;
       default:

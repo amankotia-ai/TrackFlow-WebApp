@@ -682,6 +682,272 @@ class ApiClient {
   }
   
   /**
+   * Get total page visits count across all workflows
+   */
+  async getTotalPageVisits(days: number = 30): Promise<ApiResponse> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        return {
+          success: false,
+          error: 'User not authenticated',
+          timestamp: new Date().toISOString(),
+        };
+      }
+      
+      // Get all page_load and page_view events for user's workflows
+      const { data, error } = await supabase
+        .from('analytics_events')
+        .select(`
+          id,
+          event_type,
+          session_id,
+          page_url,
+          created_at,
+          workflows!inner(user_id)
+        `)
+        .eq('workflows.user_id', user.id)
+        .in('event_type', ['page_load', 'page_view'])
+        .gte('created_at', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString());
+      
+      if (error) {
+        return {
+          success: false,
+          error: error.message,
+          timestamp: new Date().toISOString(),
+        };
+      }
+      
+      const events = data || [];
+      
+      // Calculate various metrics
+      const totalPageVisits = events.length;
+      const uniqueSessions = new Set(events.map(e => e.session_id)).size;
+      const uniquePages = new Set(events.map(e => e.page_url)).size;
+      
+      // Group by date for trend data
+      const visitsByDate = events.reduce((acc, event) => {
+        const date = new Date(event.created_at).toISOString().split('T')[0];
+        acc[date] = (acc[date] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      // Get today's visits
+      const today = new Date().toISOString().split('T')[0];
+      const todayVisits = visitsByDate[today] || 0;
+      
+      return {
+        success: true,
+        data: {
+          totalPageVisits,
+          uniqueSessions,
+          uniquePages,
+          todayVisits,
+          visitsByDate,
+          events: events.slice(0, 100) // Return recent 100 events for detail view
+        },
+        timestamp: new Date().toISOString(),
+      };
+      
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to load page visits',
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Get page analytics for user's workflows
+   */
+  async getPageAnalytics(workflowId?: string, days: number = 30): Promise<ApiResponse> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        return {
+          success: false,
+          error: 'User not authenticated',
+          timestamp: new Date().toISOString(),
+        };
+      }
+      
+      // Build the query for analytics events with page information
+      let query = supabase
+        .from('analytics_events')
+        .select(`
+          id,
+          workflow_id,
+          session_id,
+          event_type,
+          page_url,
+          page_title,
+          referrer_url,
+          device_type,
+          browser_info,
+          user_agent,
+          viewport_size,
+          screen_size,
+          event_data,
+          created_at,
+          workflows!inner(name, user_id)
+        `)
+        .eq('workflows.user_id', user.id)
+        .gte('created_at', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
+        .order('created_at', { ascending: false });
+      
+      if (workflowId) {
+        query = query.eq('workflow_id', workflowId);
+      }
+      
+      const { data, error } = await query;
+      
+      if (error) {
+        return {
+          success: false,
+          error: error.message,
+          timestamp: new Date().toISOString(),
+        };
+      }
+      
+      return {
+        success: true,
+        data: data || [],
+        timestamp: new Date().toISOString(),
+      };
+      
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to load page analytics',
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+  
+  /**
+   * Get page analytics summary for workflows
+   */
+  async getPageAnalyticsSummary(workflowId?: string, days: number = 30): Promise<ApiResponse> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        return {
+          success: false,
+          error: 'User not authenticated',
+          timestamp: new Date().toISOString(),
+        };
+      }
+      
+      // Get user's workflows first
+      const { data: userWorkflows, error: workflowError } = await supabase
+        .from('workflows')
+        .select('id, name')
+        .eq('user_id', user.id);
+      
+      if (workflowError) {
+        console.error('Error fetching workflows:', workflowError);
+        return {
+          success: false,
+          error: workflowError.message,
+          timestamp: new Date().toISOString(),
+        };
+      }
+      
+      const userWorkflowIds = userWorkflows?.map(w => w.id) || [];
+      
+      if (userWorkflowIds.length === 0) {
+        return {
+          success: true,
+          data: { executions: [], events: [] },
+          timestamp: new Date().toISOString(),
+        };
+      }
+      
+      console.log('User workflows:', userWorkflowIds);
+      
+      // Get workflow executions for user's workflows (including anonymous executions)
+      let executionQuery = supabase
+        .from('workflow_executions')
+        .select(`
+          id,
+          workflow_id,
+          page_url,
+          user_agent,
+          session_id,
+          status,
+          execution_time_ms,
+          executed_at
+        `)
+        .in('workflow_id', userWorkflowIds)
+        .gte('executed_at', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
+        .order('executed_at', { ascending: false });
+      
+      if (workflowId) {
+        executionQuery = executionQuery.eq('workflow_id', workflowId);
+      }
+      
+      const { data: executions, error: executionError } = await executionQuery;
+      
+      if (executionError) {
+        console.error('Error fetching executions:', executionError);
+      }
+      
+      // Get analytics events for user's workflows (including anonymous events)
+      let eventQuery = supabase
+        .from('analytics_events')
+        .select(`
+          workflow_id,
+          page_url,
+          page_title,
+          referrer_url,
+          device_type,
+          session_id,
+          event_type,
+          created_at
+        `)
+        .in('workflow_id', userWorkflowIds)
+        .gte('created_at', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString());
+      
+      if (workflowId) {
+        eventQuery = eventQuery.eq('workflow_id', workflowId);
+      }
+      
+      const { data: events, error: eventError } = await eventQuery;
+      
+      if (eventError) {
+        console.error('Error fetching events:', eventError);
+      }
+      
+      console.log('Page analytics summary:', {
+        userWorkflows: userWorkflowIds.length,
+        executions: executions?.length || 0,
+        events: events?.length || 0
+      });
+      
+      return {
+        success: true,
+        data: {
+          executions: executions || [],
+          events: events || []
+        },
+        timestamp: new Date().toISOString(),
+      };
+      
+    } catch (error: any) {
+      console.error('Error in getPageAnalyticsSummary:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to load page analytics summary',
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+  
+  /**
    * Scrape website content
    */
   async scrapeWebsite(url: string): Promise<ApiResponse> {

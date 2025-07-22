@@ -35,6 +35,55 @@ export interface WorkflowExecution {
   executed_at: string
 }
 
+export interface PageAnalyticsEvent extends AnalyticsEvent {
+  workflows?: {
+    name: string
+    user_id: string
+  }
+}
+
+export interface WorkflowExecutionWithPage extends WorkflowExecution {
+  workflows?: {
+    name: string
+    user_id: string
+  }
+}
+
+export interface PageAnalyticsSummary {
+  executions: WorkflowExecutionWithPage[]
+  events: PageAnalyticsEvent[]
+}
+
+export interface WorkflowPageMetrics {
+  workflowId: string
+  workflowName: string
+  totalPageViews: number
+  uniquePages: number
+  uniqueSessions: number
+  totalExecutions: number
+  successfulExecutions: number
+  successRate: number
+  avgExecutionTime: number
+  deviceBreakdown: Record<string, number>
+  topPages: Array<{
+    url: string
+    executions: number
+  }>
+  topReferrers: Array<{
+    source: string
+    visits: number
+  }>
+  recentExecutions: Array<{
+    id: string
+    pageUrl: string
+    status: string
+    executionTime: number
+    timestamp: string
+    deviceType?: string
+    sessionId?: string
+  }>
+}
+
 export interface UserStats {
   total_workflows: number
   active_workflows: number
@@ -218,6 +267,186 @@ export class AnalyticsService {
         summaryData: [],
         executions: []
       };
+    }
+  }
+
+  /**
+   * Get page analytics for user's workflows
+   */
+  static async getPageAnalytics(
+    workflowId?: string,
+    days: number = 30
+  ): Promise<PageAnalyticsEvent[]> {
+    console.log(`📊 Loading page analytics (workflowId: ${workflowId}, days: ${days})...`);
+    
+    const response: ApiResponse = await apiClient.getPageAnalytics(workflowId, days);
+    
+    if (!response.success) {
+      console.error('Failed to load page analytics:', response.error);
+      throw new Error(response.error || 'Failed to load page analytics');
+    }
+    
+    console.log(`✅ Loaded ${response.data?.length || 0} page analytics events`);
+    return response.data || [];
+  }
+
+  /**
+   * Get page analytics summary for workflows
+   */
+  static async getPageAnalyticsSummary(
+    workflowId?: string,
+    days: number = 30
+  ): Promise<PageAnalyticsSummary> {
+    console.log(`📊 Loading page analytics summary (workflowId: ${workflowId}, days: ${days})...`);
+    
+    const response: ApiResponse = await apiClient.getPageAnalyticsSummary(workflowId, days);
+    
+    if (!response.success) {
+      console.error('Failed to load page analytics summary:', response.error);
+      throw new Error(response.error || 'Failed to load page analytics summary');
+    }
+    
+    console.log(`✅ Loaded page analytics summary with ${response.data?.executions?.length || 0} executions and ${response.data?.events?.length || 0} events`);
+    return response.data || { executions: [], events: [] };
+  }
+
+  /**
+   * Get total page visits data
+   */
+  static async getTotalPageVisits(days: number = 30) {
+    console.log(`📊 Loading total page visits (${days} days)...`);
+    
+    try {
+      const response = await apiClient.getTotalPageVisits(days);
+      
+      if (response.success && response.data) {
+        console.log('✅ Loaded page visits data:', response.data);
+        return response.data;
+      } else {
+        console.error('❌ Failed to load page visits:', response.error);
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ Error loading page visits:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Process page metrics from real execution and analytics data
+   */
+  static processWorkflowPageMetrics(workflowId: string, workflowName: string, summary: PageAnalyticsSummary): WorkflowPageMetrics {
+    const executions = summary.executions.filter(exec => exec.workflow_id === workflowId);
+    const events = summary.events.filter(event => event.workflow_id === workflowId);
+    
+    // Get unique pages from executions and events
+    const pageUrls = new Set([
+      ...executions.map(exec => exec.page_url).filter(Boolean),
+      ...events.map(event => event.page_url).filter(Boolean)
+    ]);
+    
+    // Get unique sessions from executions and events
+    const sessionIds = new Set([
+      ...executions.map(exec => exec.session_id).filter(Boolean),
+      ...events.map(event => event.session_id).filter(Boolean)
+    ]);
+    
+    // Get page view events
+    const pageViewEvents = events.filter(event => event.event_type === 'page_view');
+    
+    // Get device breakdown from executions (since they have more reliable device info)
+    const deviceBreakdown = executions.reduce((acc, exec) => {
+      const deviceType = this.extractDeviceTypeFromUserAgent(exec.user_agent) || 'unknown';
+      acc[deviceType] = (acc[deviceType] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    // Calculate success rate
+    const successfulExecutions = executions.filter(exec => exec.status === 'success').length;
+    const successRate = executions.length > 0 ? (successfulExecutions / executions.length) * 100 : 0;
+    
+    // Get top pages by execution count
+    const pageExecutionCounts = executions.reduce((acc, exec) => {
+      if (exec.page_url) {
+        acc[exec.page_url] = (acc[exec.page_url] || 0) + 1;
+      }
+      return acc;
+    }, {} as Record<string, number>);
+    
+    const topPages = Object.entries(pageExecutionCounts)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 5)
+      .map(([url, count]) => ({ url, executions: count }));
+    
+    // Get referrer data from events
+    const referrerCounts = events.reduce((acc, event) => {
+      if (event.referrer_url) {
+        const domain = this.extractDomain(event.referrer_url);
+        acc[domain] = (acc[domain] || 0) + 1;
+      } else {
+        acc['Direct'] = (acc['Direct'] || 0) + 1;
+      }
+      return acc;
+    }, {} as Record<string, number>);
+    
+    const topReferrers = Object.entries(referrerCounts)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 3)
+      .map(([source, count]) => ({ source, visits: count }));
+
+    return {
+      workflowId,
+      workflowName,
+      totalPageViews: pageViewEvents.length,
+      uniquePages: pageUrls.size,
+      uniqueSessions: sessionIds.size,
+      totalExecutions: executions.length,
+      successfulExecutions,
+      successRate: Math.round(successRate),
+      avgExecutionTime: executions.length > 0 ? 
+        Math.round(executions.reduce((sum, exec) => sum + (exec.execution_time_ms || 0), 0) / executions.length) : 0,
+      deviceBreakdown,
+      topPages,
+      topReferrers,
+      recentExecutions: executions
+        .sort((a, b) => new Date(b.executed_at).getTime() - new Date(a.executed_at).getTime())
+        .slice(0, 10)
+        .map(exec => ({
+          id: exec.id,
+          pageUrl: exec.page_url || 'Unknown',
+          status: exec.status,
+          executionTime: exec.execution_time_ms || 0,
+          timestamp: exec.executed_at,
+          deviceType: this.extractDeviceTypeFromUserAgent(exec.user_agent),
+          sessionId: exec.session_id || undefined
+        }))
+    };
+  }
+  
+  /**
+   * Extract device type from user agent string
+   */
+  static extractDeviceTypeFromUserAgent(userAgent: string | null): string {
+    if (!userAgent) return 'unknown';
+    
+    const ua = userAgent.toLowerCase();
+    if (ua.includes('mobile') || ua.includes('android') || ua.includes('iphone')) {
+      return 'mobile';
+    } else if (ua.includes('tablet') || ua.includes('ipad')) {
+      return 'tablet';
+    } else {
+      return 'desktop';
+    }
+  }
+  
+  /**
+   * Extract domain from URL
+   */
+  static extractDomain(url: string): string {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
     }
   }
 } 

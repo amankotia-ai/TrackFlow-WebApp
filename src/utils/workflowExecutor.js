@@ -237,6 +237,7 @@
             break;
           
           case 'Redirect Page':
+          case 'Redirect User':
             await this.executeRedirectPage(standardizedAction.config);
             break;
           
@@ -342,7 +343,7 @@
             config.newTab = action.newTab || false;
             return {
               id: action.id || `legacy-${Date.now()}`,
-              name: 'Redirect Page',
+              name: 'Redirect User', // Use the current node template name
               config
             };
             
@@ -559,17 +560,31 @@
     }
 
     async executeRedirectPage(config) {
-      const delay = config.delay || 0;
+      // Validate URL
+      if (!config.url || typeof config.url !== 'string') {
+        console.error('⚠️ Redirect action: Invalid or missing URL');
+        return;
+      }
+
+      const delay = (config.delay || 0) * 1000; // Convert seconds to milliseconds
+      
+      if (this.config.debug) {
+        console.log(`🔄 Redirect scheduled: ${config.url} (delay: ${config.delay || 0}s, newTab: ${config.newTab || false})`);
+      }
       
       setTimeout(() => {
-        if (config.newTab) {
-          window.open(config.url, '_blank');
-        } else {
-          window.location.href = config.url;
+        try {
+          if (config.newTab) {
+            window.open(config.url, '_blank', 'noopener,noreferrer');
+          } else {
+            window.location.href = config.url;
+          }
+        } catch (error) {
+          console.error('❌ Redirect failed:', error);
         }
       }, delay);
       
-      this.logActionExecution('Redirect Page', config.url);
+      this.logActionExecution('Redirect', config.url);
     }
 
     async executeCustomEvent(config) {

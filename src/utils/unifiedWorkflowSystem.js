@@ -798,6 +798,7 @@
             break;
             
           case 'Redirect Page':
+          case 'Redirect User':
             result = await this.redirectPage(config);
             break;
             
@@ -1051,14 +1052,30 @@
     }
 
     async redirectPage(config) {
+      // Validate URL
+      if (!config.url || typeof config.url !== 'string') {
+        this.log('⚠️ Redirect action: Invalid or missing URL', 'error');
+        return { success: false, error: 'Invalid or missing URL' };
+      }
+
+      const delay = (config.delay || 0) * 1000; // Convert seconds to milliseconds
+      
+      this.log(`🔄 Redirect scheduled: ${config.url} (delay: ${config.delay || 0}s, newTab: ${config.newTab || false})`);
+      
       setTimeout(() => {
-        if (config.newTab) {
-          window.open(config.url, '_blank');
-        } else {
-          window.location.href = config.url;
+        try {
+          if (config.newTab) {
+            window.open(config.url, '_blank', 'noopener,noreferrer');
+          } else {
+            window.location.href = config.url;
+          }
+        } catch (error) {
+          this.log(`❌ Redirect failed: ${error.message}`, 'error');
         }
-      }, config.delay || 0);
+      }, delay);
+      
       this.log(`✅ Redirect scheduled to: ${config.url}`);
+      return { success: true };
     }
 
     // Utility methods
