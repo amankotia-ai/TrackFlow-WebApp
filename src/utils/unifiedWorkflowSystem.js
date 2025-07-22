@@ -85,6 +85,9 @@
       try {
         this.log('🚀 Initializing unified workflow system...');
         
+        // Wait for DOM to be ready first
+        await this.waitForDOMReady();
+        
         // Fetch all active workflows first - this is CRITICAL
         await this.fetchWorkflows();
         this.log(`📊 Workflows loaded: ${this.workflows.size} workflows available`);
@@ -98,8 +101,8 @@
         // Set up event listeners for dynamic triggers
         this.setupEventListeners();
         
-        // Set up mutation observer for dynamic content
-        this.setupMutationObserver();
+        // Set up mutation observer for dynamic content (after DOM is ready)
+        await this.setupMutationObserver();
         
         // Wait for all pending element operations to complete
         await this.waitForAllModifications();
@@ -110,8 +113,14 @@
         this.initialized = true;
         this.log('✅ Unified workflow system ready!', 'success');
         
+        // Dispatch ready event
+        window.dispatchEvent(new CustomEvent('workflowSystemReady', {
+          detail: { system: this }
+        }));
+        
       } catch (error) {
         this.log(`❌ Initialization failed: ${error.message}`, 'error');
+        console.error('Unified Workflow System Error:', error);
         this.showContent(); // Show content even if initialization fails
       }
     }
@@ -158,9 +167,51 @@
     }
 
     /**
+     * Wait for DOM to be ready
+     */
+    waitForDOMReady() {
+      return new Promise((resolve) => {
+        if (document.readyState === 'complete') {
+          resolve();
+          return;
+        }
+        
+        if (document.readyState === 'interactive' || document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', resolve, { once: true });
+          return;
+        }
+        
+        // Fallback
+        setTimeout(resolve, 100);
+      });
+    }
+
+    /**
+     * Wait for document.body to be available
+     */
+    waitForBody() {
+      return new Promise((resolve) => {
+        if (document.body && document.body.nodeType === 1) {
+          resolve();
+          return;
+        }
+        
+        const checkBody = () => {
+          if (document.body && document.body.nodeType === 1) {
+            resolve();
+          } else {
+            setTimeout(checkBody, 100);
+          }
+        };
+        
+        checkBody();
+      });
+    }
+
+    /**
      * Set up mutation observer for dynamic content
      */
-    setupMutationObserver() {
+    async setupMutationObserver() {
       // Only set up if we have content replacement rules
       const hasContentRules = Array.from(this.selectorRulesMap.keys()).some(
         selector => selector.includes('button') || selector.includes('input') || selector.includes('a')
@@ -179,7 +230,7 @@
         mutations.forEach(mutation => {
           if (mutation.type === 'childList' && mutation.addedNodes.length) {
             mutation.addedNodes.forEach(node => {
-              if (node.nodeType !== 1) return; // Not an element
+              if (node.nodeType !== Node.ELEMENT_NODE) return; // Not an element
               
               // Check if this is a relevant element for content replacement only
               if (this.isRelevantElement(node)) {
@@ -196,22 +247,25 @@
         }
       });
       
-      // Start observing - add safety check
-      if (document.body && document.body.nodeType === 1) {
-        try {
-          this.mutationObserver.observe(document.body, { 
-            childList: true, 
-            subtree: true 
-          });
-          this.log('Mutation observer setup for dynamic content (content replacement only)');
-        } catch (error) {
-          this.log('Failed to setup mutation observer: ' + error.message, 'error');
-          this.mutationObserver = null;
+      try {
+        // Wait for body to be ready
+        await this.waitForBody();
+        
+        if (!document.body || document.body.nodeType !== 1) {
+          this.log('Document body still not ready after waiting', 'warning');
+          return;
         }
-      } else {
-        this.log('Document body not ready for mutation observer', 'warning');
-        // Retry when DOM is ready
-        setTimeout(() => this.setupMutationObserver(), 1000);
+        
+        // Start observing
+        this.mutationObserver.observe(document.body, { 
+          childList: true, 
+          subtree: true 
+        });
+        this.log('Mutation observer setup for dynamic content (content replacement only)');
+        
+      } catch (error) {
+        this.log('Failed to setup mutation observer: ' + error.message, 'error');
+        this.mutationObserver = null;
       }
     }
 
@@ -1453,6 +1507,13 @@
     window.DISABLE_LEGACY_WORKFLOWS = true;
     
     console.log('🎯 Unified Workflow System: Initializing new instance...');
+    
+    // Ensure UnifiedWorkflowSystem is available
+    if (typeof UnifiedWorkflowSystem === 'undefined') {
+      console.error('❌ UnifiedWorkflowSystem class not available');
+      return;
+    }
+    
     window.workflowSystem = new UnifiedWorkflowSystem();
     
     // Track initialization state
@@ -1505,6 +1566,12 @@
       } catch (error) {
         console.error('🎯 Full initialization failed:', error);
         fullInitComplete = false; // Reset on failure
+        
+        // Ensure content is shown even if initialization fails
+        if (document.documentElement.style.opacity === '0') {
+          document.documentElement.style.opacity = '1';
+          console.log('🎯 Content shown after initialization failure');
+        }
       }
     };
     
