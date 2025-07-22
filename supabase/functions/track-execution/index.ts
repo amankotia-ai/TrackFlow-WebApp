@@ -88,24 +88,7 @@ serve(async (req) => {
       )
     }
 
-    // Update workflow execution count if userId is provided
-    if (userId) {
-      const { error: countError } = await supabaseClient
-        .from('workflows')
-        .update({ 
-          executions: supabaseClient.raw('executions + 1'),
-          last_run: new Date().toISOString()
-        })
-        .eq('id', workflowId)
-        .eq('user_id', userId)
-
-      if (countError) {
-        console.error('Failed to update workflow execution count:', countError)
-        // Don't fail the request - execution was tracked, count update is secondary
-      } else {
-        console.log(`✅ Updated execution count for workflow ${workflowId}`)
-      }
-    }
+    console.log(`✅ Workflow execution tracked successfully: ${executionId}`)
 
     // Track individual action executions if provided
     if (actions.length > 0 && executionId) {

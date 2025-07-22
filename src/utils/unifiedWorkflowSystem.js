@@ -25,6 +25,8 @@
       
       this.workflows = new Map();
       this.executedActions = new Set();
+      this.executedWorkflows = new Set(); // Track executed workflows to prevent duplicates
+      this.processingWorkflows = false; // Flag to prevent recursive processWorkflows calls
       this.pageContext = this.getPageContext();
       this.userContext = this.getUserContext();
       this.contentHidden = false;
@@ -167,6 +169,8 @@
       }
       
       this.mutationObserver = new MutationObserver(mutations => {
+        // Prevent mutation observer from triggering workflow processing
+        // Only reapply existing content rules, don't trigger new workflows
         let shouldReapply = false;
         
         mutations.forEach(mutation => {
@@ -174,7 +178,7 @@
             mutation.addedNodes.forEach(node => {
               if (node.nodeType !== 1) return; // Not an element
               
-              // Check if this is a relevant element
+              // Check if this is a relevant element for content replacement only
               if (this.isRelevantElement(node)) {
                 shouldReapply = true;
               }
@@ -183,7 +187,8 @@
         });
         
         if (shouldReapply) {
-          this.log('New relevant elements detected, reapplying rules');
+          this.log('New relevant elements detected, reapplying content rules only (no workflow triggers)');
+          // Only reapply content rules, don't process workflows
           this.reapplyContentRules();
         }
       });
@@ -194,7 +199,7 @@
           childList: true, 
           subtree: true 
         });
-        this.log('Mutation observer setup for dynamic content');
+        this.log('Mutation observer setup for dynamic content (content replacement only)');
       }
     }
 
@@ -394,48 +399,73 @@
         return;
       }
 
-      for (const [workflowId, workflow] of this.workflows) {
-        const isActive = workflow.is_active ?? workflow.isActive ?? true;
-        if (!isActive) continue;
+      // Prevent recursive calls to processWorkflows
+      if (this.processingWorkflows) {
+        this.log('⚠️ Already processing workflows, skipping to prevent recursion', 'warning');
+        return;
+      }
 
-        // Find trigger nodes
-        const triggerNodes = workflow.nodes?.filter(node => node.type === 'trigger') || [];
-        
-        for (const trigger of triggerNodes) {
-          if (this.evaluateTrigger(trigger, eventData)) {
-            this.log(`🎯 Workflow triggered: ${workflow.name} by ${trigger.name}`, 'success');
-            
-            // Find and execute connected actions
-            const actions = this.getConnectedActions(workflow, trigger.id);
-            this.log(`🔗 Found ${actions.length} connected actions for trigger ${trigger.id}`, 'info', actions);
-            
-            // Store action selectors in our mapping for mutation observer
-            actions.forEach(action => {
-              if (action.name === 'Replace Text' && action.config?.selector) {
-                this.selectorRulesMap.set(action.config.selector, action.config);
+      this.processingWorkflows = true;
+
+      try {
+        for (const [workflowId, workflow] of this.workflows) {
+          const isActive = workflow.is_active ?? workflow.isActive ?? true;
+          if (!isActive) continue;
+
+          // Find trigger nodes
+          const triggerNodes = workflow.nodes?.filter(node => node.type === 'trigger') || [];
+          
+          for (const trigger of triggerNodes) {
+            if (this.evaluateTrigger(trigger, eventData)) {
+              this.log(`🎯 Workflow triggered: ${workflow.name} by ${trigger.name}`, 'success');
+              
+              // Create unique execution key to prevent duplicate tracking
+              const executionKey = `${workflow.id}-${trigger.id}-${Date.now()}`;
+              
+              // Check if this exact execution has already been tracked
+              if (this.executedWorkflows.has(executionKey)) {
+                this.log(`⚠️ Workflow execution already tracked: ${executionKey}`, 'warning');
+                continue;
               }
-            });
-            
-            // Track workflow execution start time
-            const executionStartTime = performance.now();
-            
-            // Execute the actions
-            const executedActions = await this.executeActions(actions);
-            
-            // Calculate execution time
-            const executionTime = Math.round(performance.now() - executionStartTime);
-            
-            // Track the workflow execution
-            await this.trackWorkflowExecution(workflow, {
-              status: 'success',
-              executionTimeMs: executionTime,
-              pageUrl: window.location.href,
-              deviceType: this.pageContext.deviceType,
-              triggerName: trigger.name,
-              actionsExecuted: executedActions || []
-            });
+              
+              // Mark this workflow execution as tracked
+              this.executedWorkflows.add(executionKey);
+              
+              // Find and execute connected actions
+              const actions = this.getConnectedActions(workflow, trigger.id);
+              this.log(`🔗 Found ${actions.length} connected actions for trigger ${trigger.id}`, 'info', actions);
+              
+              // Store action selectors in our mapping for mutation observer
+              actions.forEach(action => {
+                if (action.name === 'Replace Text' && action.config?.selector) {
+                  this.selectorRulesMap.set(action.config.selector, action.config);
+                }
+              });
+              
+              // Track workflow execution start time
+              const executionStartTime = performance.now();
+              
+              // Execute the actions
+              const executedActions = await this.executeActions(actions);
+              
+              // Calculate execution time
+              const executionTime = Math.round(performance.now() - executionStartTime);
+              
+              // Track the workflow execution (only once per execution)
+              await this.trackWorkflowExecution(workflow, {
+                status: 'success',
+                executionTimeMs: executionTime,
+                pageUrl: window.location.href,
+                deviceType: this.pageContext.deviceType,
+                triggerName: trigger.name,
+                actionsExecuted: executedActions || [],
+                executionKey: executionKey
+              });
+            }
           }
         }
+      } finally {
+        this.processingWorkflows = false;
       }
     }
 
@@ -1174,7 +1204,8 @@
           sessionId: this.generateSessionId(),
           userAgent: navigator.userAgent,
           deviceType: executionData.deviceType,
-          actions: executionData.actionsExecuted || []
+          actions: executionData.actionsExecuted || [],
+          executionKey: executionData.executionKey // Add executionKey to payload
         };
 
         this.log(`📊 Tracking execution for workflow: ${workflow.name}`, 'info', trackingPayload);
@@ -1222,9 +1253,21 @@
   if (!window.workflowSystem && !window.DISABLE_LEGACY_WORKFLOWS) {
     window.workflowSystem = new UnifiedWorkflowSystem();
     
+    // Track initialization state
+    let priorityInitComplete = false;
+    let fullInitComplete = false;
+    
     // Priority initialization for immediate content replacement
     const priorityInit = async () => {
+      if (priorityInitComplete) {
+        console.log('🎯 Priority init already completed, skipping');
+        return;
+      }
+      
       try {
+        console.log('🎯 Starting priority initialization...');
+        priorityInitComplete = true;
+        
         // Fetch workflows first, then execute priority actions
         await window.workflowSystem.fetchWorkflows();
         console.log(`🎯 Priority init: ${window.workflowSystem.workflows.size} workflows loaded`);
@@ -1236,6 +1279,30 @@
         }
       } catch (error) {
         console.error('🎯 Priority initialization failed:', error);
+        priorityInitComplete = false; // Reset on failure
+      }
+    };
+    
+    // Full initialization 
+    const fullInit = async () => {
+      if (fullInitComplete) {
+        console.log('🎯 Full init already completed, skipping');
+        return;
+      }
+      
+      try {
+        console.log('🎯 Starting full initialization...');
+        fullInitComplete = true;
+        
+        // Wait for priority init to complete first
+        while (!priorityInitComplete) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        await window.workflowSystem.initialize();
+      } catch (error) {
+        console.error('🎯 Full initialization failed:', error);
+        fullInitComplete = false; // Reset on failure
       }
     };
     
@@ -1250,11 +1317,11 @@
       
       // Full initialization on DOMContentLoaded
       document.addEventListener('DOMContentLoaded', () => {
-        window.workflowSystem.initialize();
+        fullInit();
       }, { once: true });
     } else {
       // Document already loaded - run priority init then full init
-      priorityInit().then(() => window.workflowSystem.initialize());
+      priorityInit().then(() => fullInit());
     }
   }
 

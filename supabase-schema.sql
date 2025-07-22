@@ -457,17 +457,18 @@ CREATE OR REPLACE FUNCTION public.track_workflow_execution(
   p_execution_time_ms INTEGER,
   p_error_message TEXT,
   p_page_url TEXT,
-  p_session_id TEXT
+  p_session_id TEXT,
+  p_user_agent TEXT
 ) RETURNS UUID AS $$
 DECLARE
   v_execution_id UUID;
 BEGIN
   INSERT INTO public.workflow_executions (
     workflow_id, user_id, status, execution_time_ms, 
-    error_message, page_url, session_id
+    error_message, page_url, session_id, user_agent
   ) VALUES (
     p_workflow_id, p_user_id, p_status, p_execution_time_ms,
-    p_error_message, p_page_url, p_session_id
+    p_error_message, p_page_url, p_session_id, p_user_agent
   ) RETURNING id INTO v_execution_id;
   
   -- Update workflow execution count and last run
