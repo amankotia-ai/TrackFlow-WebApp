@@ -1030,8 +1030,8 @@
   // Global API
   window.WorkflowExecutor = WorkflowExecutor;
 
-  // Auto-initialize
-  if (!window.workflowExecutor) {
+  // Auto-initialize only if not disabled
+  if (!window.DISABLE_LEGACY_WORKFLOWS && !window.workflowExecutor) {
     window.workflowExecutor = new WorkflowExecutor();
     
     // Initialize after DOM is ready
@@ -1042,6 +1042,8 @@
     } else {
       window.workflowExecutor.initialize();
     }
+  } else if (window.DISABLE_LEGACY_WORKFLOWS) {
+    console.log('🎯 Workflow Executor: Legacy workflows disabled, skipping auto-initialization');
   }
 
 })(); 

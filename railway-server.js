@@ -213,13 +213,16 @@ app.get('/api/unified-workflow-system.js', (req, res) => {
     
     // Initialize ONLY unified workflow system (which includes tracking)
     if (typeof UnifiedWorkflowSystem !== 'undefined') {
-      if (!window.workflowSystem) {
+      if (!window.workflowSystem && !window.workflowExecutor) {
+        console.log('🎯 TrackFlow: Creating new UnifiedWorkflowSystem instance...');
         window.workflowSystem = new UnifiedWorkflowSystem({
           ...window.TRACKFLOW_CONFIG
         });
         console.log('✅ TrackFlow: Unified workflow system initialized (includes tracking)');
       } else {
-        console.log('🎯 TrackFlow: Workflow system already exists, skipping');
+        console.log('🎯 TrackFlow: Workflow system already exists, skipping initialization');
+        console.log('  - window.workflowSystem:', !!window.workflowSystem);
+        console.log('  - window.workflowExecutor:', !!window.workflowExecutor);
       }
     } else {
       console.error('❌ TrackFlow: UnifiedWorkflowSystem not available');
