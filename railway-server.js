@@ -304,28 +304,255 @@ app.options('/tracking-script.js', (req, res) => {
   res.sendStatus(200);
 });
 
-// Analytics endpoint for tracking events
+// Enhanced Analytics tracking endpoint with comprehensive tracking
 app.post('/api/analytics/track', async (req, res) => {
   try {
-    const { events } = req.body;
+    const { events, metadata } = req.body;
     
-    console.log('📊 Received analytics events:', events?.length || 0);
+    if (!events || !Array.isArray(events)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Events array is required' 
+      });
+    }
+
+    console.log(`📊 Analytics: Received batch of ${events.length} events from session ${metadata?.sessionId}`);
     
+    // Process events through comprehensive tracking
     if (events && events.length > 0) {
-      // Log the events for now (in production, save to database)
-      events.forEach(event => {
-        console.log('📊 Event:', event.eventType, event.elementSelector, event.pageContext?.pathname);
+      const processedEvents = [];
+      
+      for (const event of events) {
+        try {
+          // Extract comprehensive data from the event
+          const pageUrl = event.pageContext?.url || event.pageContext?.pathname || event.url || window?.location?.href;
+          const sessionId = event.sessionId || metadata?.sessionId;
+          const eventType = event.eventType || event.type;
+          
+          // Parse UTM parameters from URL
+          let utmParams = {};
+          if (pageUrl) {
+            try {
+              const url = new URL(pageUrl);
+              utmParams = {
+                utm_source: url.searchParams.get('utm_source'),
+                utm_medium: url.searchParams.get('utm_medium'),
+                utm_campaign: url.searchParams.get('utm_campaign'),
+                utm_content: url.searchParams.get('utm_content'),
+                utm_term: url.searchParams.get('utm_term')
+              };
+            } catch (urlError) {
+              console.warn('⚠️ Could not parse URL for UTM params:', pageUrl);
+            }
+          }
+
+          // Extract device and browser info
+          const userAgent = event.userContext?.userAgent || req.headers['user-agent'];
+          const deviceType = event.userContext?.deviceType || 
+            (userAgent && userAgent.match(/Mobile|Android|iPhone|iPad/) ? 'mobile' : 'desktop');
+
+          // Generate visitor ID if not provided
+          const visitorId = event.visitorId || 
+            `visitor_${sessionId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+          // Use comprehensive tracking function
+          const { data: eventId, error } = await supabase.rpc('track_visitor_event', {
+            p_session_id: sessionId,
+            p_visitor_id: visitorId,
+            p_user_id: null, // Anonymous for now - could be set if authenticated
+            p_event_type: eventType,
+            p_page_url: pageUrl,
+            p_page_title: event.pageContext?.title || event.element?.title,
+            p_referrer_url: event.pageContext?.referrer,
+            p_utm_source: utmParams.utm_source,
+            p_utm_medium: utmParams.utm_medium,
+            p_utm_campaign: utmParams.utm_campaign,
+            p_utm_content: utmParams.utm_content,
+            p_utm_term: utmParams.utm_term,
+            p_device_type: deviceType,
+            p_browser_name: event.userContext?.browserName,
+            p_browser_version: event.userContext?.browserVersion,
+            p_operating_system: event.userContext?.platform || event.userContext?.os,
+            p_screen_resolution: event.userContext?.screen ? 
+              `${event.userContext.screen.width}x${event.userContext.screen.height}` : null,
+            p_viewport_size: event.userContext?.viewport ? 
+              `${event.userContext.viewport.width}x${event.userContext.viewport.height}` : null,
+            p_user_agent: userAgent,
+            p_ip_address: req.ip || req.connection.remoteAddress,
+            p_country_code: req.headers['cf-ipcountry'] || null, // Cloudflare country
+            p_city: null, // Could be added with geolocation service
+            p_element_selector: event.elementSelector || event.element?.className,
+            p_element_text: event.elementText || event.element?.textContent || event.eventData?.elementText,
+            p_element_attributes: event.eventData?.elementAttributes || event.element || {},
+            p_form_data: event.eventData?.formData || event.eventData?.formFields || {},
+            p_scroll_depth: event.eventData?.scrollDepth || 0,
+            p_time_on_page: event.eventData?.timeOnPage || 0,
+            p_conversion_value: event.eventData?.conversionValue || null,
+            p_custom_properties: {
+              ...event.eventData,
+              originalEvent: event
+            }
+          });
+
+          if (error) {
+            console.error('❌ Error tracking visitor event:', error);
+          } else {
+            processedEvents.push({ eventId, originalEvent: event });
+            console.log(`✅ Tracked comprehensive event: ${eventId} (${eventType})`);
+          }
+
+          // Also save to legacy analytics_events table for backward compatibility
+          const { error: legacyError } = await supabase
+            .from('analytics_events')
+            .insert({
+              session_id: sessionId,
+              event_type: eventType,
+              element_selector: event.elementSelector || event.element?.className,
+              element_text: event.eventData?.elementText || event.element?.textContent,
+              element_attributes: event.eventData?.elementAttributes || event.element || {},
+              page_url: pageUrl,
+              page_title: event.pageContext?.title || event.element?.title,
+              referrer_url: event.pageContext?.referrer,
+              device_type: deviceType,
+              browser_info: {
+                userAgent: userAgent,
+                language: event.userContext?.language,
+                platform: event.userContext?.platform
+              },
+              user_agent: userAgent,
+              viewport_size: event.userContext?.viewport,
+              screen_size: event.userContext?.screen,
+              event_data: event.eventData || event
+            });
+
+          if (legacyError) {
+            console.warn('⚠️ Legacy analytics save warning:', legacyError);
+          }
+
+        } catch (eventError) {
+          console.error('❌ Error processing individual event:', eventError, event);
+        }
+      }
+
+      console.log(`✅ Processed ${processedEvents.length}/${events.length} events successfully`);
+    }
+
+    // Return success
+    res.json({
+      success: true,
+      processed: events.length,
+      timestamp: new Date(),
+      sessionId: metadata?.sessionId,
+      message: 'Events processed with comprehensive tracking'
+    });
+
+  } catch (error) {
+    console.error('❌ Analytics tracking error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to process analytics events',
+      timestamp: new Date()
+    });
+  }
+});
+
+// Comprehensive analytics endpoint for authenticated users
+app.get('/api/analytics/comprehensive', async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    
+    console.log(`📊 Fetching comprehensive analytics for last ${days} days`);
+    
+    // Mock user ID for demo - in production, get from auth
+    const mockUserId = '00000000-0000-0000-0000-000000000000';
+    
+    // Get comprehensive analytics using our new function
+    const { data, error } = await supabase.rpc('get_user_comprehensive_analytics', {
+      p_user_id: mockUserId,
+      p_days: parseInt(days)
+    });
+    
+    if (error) {
+      console.error('❌ Error fetching comprehensive analytics:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch analytics data',
+        details: error.message
       });
     }
     
-    res.json({ 
-      success: true, 
-      received: events?.length || 0,
+    const analytics = data && data.length > 0 ? data[0] : {
+      total_visitors: 0,
+      total_pageviews: 0,
+      total_sessions: 0,
+      total_conversions: 0,
+      conversion_rate: 0,
+      top_pages: [],
+      top_utm_sources: [],
+      device_breakdown: [],
+      daily_stats: []
+    };
+    
+    res.json({
+      success: true,
+      data: analytics,
+      timeframe: `${days} days`,
       timestamp: new Date().toISOString()
     });
+    
   } catch (error) {
-    console.error('❌ Analytics error:', error);
-    res.status(500).json({ success: false, error: 'Failed to save analytics' });
+    console.error('❌ Comprehensive analytics error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch comprehensive analytics',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Workflow page mappings endpoint
+app.get('/api/analytics/workflow-mappings', async (req, res) => {
+  try {
+    const { page_url } = req.query;
+    
+    if (!page_url) {
+      return res.status(400).json({
+        success: false,
+        error: 'page_url parameter is required'
+      });
+    }
+    
+    console.log(`📊 Finding workflows for page: ${page_url}`);
+    
+    // Find workflows that match this page URL
+    const { data, error } = await supabase.rpc('find_workflows_for_page_url', {
+      p_page_url: page_url
+    });
+    
+    if (error) {
+      console.error('❌ Error finding workflow mappings:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to find workflow mappings',
+        details: error.message
+      });
+    }
+    
+    res.json({
+      success: true,
+      page_url: page_url,
+      matching_workflows: data || [],
+      count: data ? data.length : 0,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Workflow mappings error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch workflow mappings',
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
