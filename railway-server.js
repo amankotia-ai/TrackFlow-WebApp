@@ -162,6 +162,131 @@ app.get('/api/test-unified-system', (req, res) => {
   }
 });
 
+// Serve unified workflow system endpoint
+app.get('/api/unified-workflow-system.js', (req, res) => {
+  try {
+    // Read both tracking and workflow files
+    const elementTracker = fs.readFileSync(path.join(__dirname, 'src/utils/elementTracker.js'), 'utf8');
+    const unifiedWorkflow = fs.readFileSync(path.join(__dirname, 'src/utils/unifiedWorkflowSystem.js'), 'utf8');
+    
+    // Combine them into one script
+    const unifiedScript = `
+// Unified Workflow System - Production Ready
+(function() {
+  'use strict';
+  
+  console.log('🎯 TrackFlow: Initializing Unified Workflow System...');
+  
+  // Override default config with production endpoints
+  window.TRACKFLOW_CONFIG = {
+    apiEndpoint: 'https://trackflow-webapp-production.up.railway.app/api/analytics/track',
+    workflowEndpoint: 'https://trackflow-webapp-production.up.railway.app',
+    debug: true,
+    autoTrack: true,
+    autoInit: true
+  };
+  
+  ${elementTracker}
+  
+  ${unifiedWorkflow}
+  
+  // Auto-initialize after scripts load
+  document.addEventListener('DOMContentLoaded', function() {
+    console.log('🎯 TrackFlow: DOM loaded, initializing system...');
+    
+    // Initialize element tracker
+    if (typeof ElementEventTracker !== 'undefined') {
+      window.elementTracker = new ElementEventTracker(window.TRACKFLOW_CONFIG);
+      console.log('✅ TrackFlow: Element tracker initialized');
+    }
+    
+    // Initialize unified workflow system
+    if (typeof UnifiedWorkflowSystem !== 'undefined') {
+      window.workflowSystem = new UnifiedWorkflowSystem({
+        ...window.TRACKFLOW_CONFIG,
+        elementTracker: window.elementTracker
+      });
+      console.log('✅ TrackFlow: Workflow system initialized');
+    }
+    
+    // Track initial page load
+    if (window.elementTracker && window.elementTracker.addEvent) {
+      window.elementTracker.addEvent({
+        eventType: 'page_view',
+        timestamp: Date.now(),
+        pageContext: {
+          url: window.location.href,
+          title: document.title,
+          referrer: document.referrer
+        },
+        userContext: {
+          userAgent: navigator.userAgent,
+          deviceType: window.innerWidth > 768 ? 'desktop' : 'mobile',
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          screen: { width: screen.width, height: screen.height }
+        }
+      });
+      console.log('📊 TrackFlow: Initial page view tracked');
+    }
+  });
+  
+})();
+`;
+    
+    // Set proper headers
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    
+    console.log('📦 Serving unified workflow system to:', req.get('origin') || req.ip);
+    res.send(unifiedScript);
+    
+  } catch (error) {
+    console.error('❌ Error serving unified workflow system:', error);
+    res.status(500).json({ error: 'Failed to load unified workflow system' });
+  }
+});
+
+// Serve anti-flicker script
+app.get('/api/anti-flicker.js', (req, res) => {
+  try {
+    const antiFlickerScript = fs.readFileSync(path.join(__dirname, 'src/utils/antiFlickerScript.js'), 'utf8');
+    
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    console.log('📦 Serving anti-flicker script to:', req.get('origin') || req.ip);
+    res.send(antiFlickerScript);
+    
+  } catch (error) {
+    console.error('❌ Error serving anti-flicker script:', error);
+    // Fallback anti-flicker script
+    const fallbackScript = `
+// Fallback Anti-Flicker Script
+(function() {
+  console.log('🎯 TrackFlow: Anti-flicker activated');
+  document.documentElement.style.opacity = '0';
+  
+  function showContent() {
+    document.documentElement.style.transition = 'opacity 0.3s ease';
+    document.documentElement.style.opacity = '1';
+    console.log('✅ TrackFlow: Content revealed');
+  }
+  
+  // Show content after workflows load or timeout
+  setTimeout(showContent, 3000);
+  
+  // Listen for workflow system ready
+  window.addEventListener('workflowSystemReady', showContent);
+})();
+`;
+    res.send(fallbackScript);
+  }
+});
+
 // Serve tracking script endpoint
 app.get('/tracking-script.js', (req, res) => {
   try {
@@ -247,43 +372,6 @@ app.get('/api/workflow-executor.js', (req, res) => {
   const workflowExecutorScript = fs.readFileSync(path.join(__dirname, 'src/utils/workflowExecutor.js'), 'utf8');
   console.log('📦 Serving workflow executor script');
   res.send(workflowExecutorScript);
-});
-
-// Serve unified workflow system
-app.get('/api/unified-workflow-system.js', (req, res) => {
-  try {
-    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    
-    const unifiedSystemScript = fs.readFileSync(path.join(__dirname, 'src/utils/unifiedWorkflowSystem.js'), 'utf8');
-    console.log('📦 Serving unified workflow system script to:', req.get('origin') || req.ip);
-    res.send(unifiedSystemScript);
-  } catch (error) {
-    console.error('❌ Error serving unified workflow system script:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to load unified workflow system script',
-      details: error.message 
-    });
-  }
-});
-
-// Serve anti-flicker script
-app.get('/api/anti-flicker.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-  
-  try {
-    const antiFlickerScript = fs.readFileSync(path.join(__dirname, 'src/utils/antiFlickerScript.js'), 'utf8');
-    console.log('📦 Serving anti-flicker script');
-    res.send(antiFlickerScript);
-  } catch (error) {
-    console.error('❌ Anti-flicker script not found:', error.message);
-    res.status(404).send('// Anti-flicker script not found');
-  }
 });
 
 // Legacy endpoint - deprecated, use unified system instead
