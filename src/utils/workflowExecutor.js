@@ -1,6 +1,7 @@
 /**
  * Workflow Execution Engine
  * Handles fetching, evaluating, and executing workflow operations
+ * LEGACY SYSTEM - USE UNIFIED WORKFLOW SYSTEM INSTEAD
  */
 
 (function() {
@@ -9,9 +10,9 @@
   class WorkflowExecutor {
     constructor(config = {}) {
       // Prevent conflicts with unified workflow system
-      if (window.DISABLE_LEGACY_WORKFLOWS && window.workflowSystem) {
+      if (window.DISABLE_LEGACY_WORKFLOWS || window.workflowSystem) {
         console.log('🎯 Workflow Executor: Unified system is active, skipping legacy initialization');
-        return;
+        return null; // Return null to indicate this instance should not be used
       }
 
       this.config = {
@@ -30,13 +31,14 @@
       this.userContext = this.getUserContext();
       this.contentHidden = false;
       this.initializationComplete = false;
+      this.isLegacySystem = true; // Mark as legacy
       
       // Hide content immediately if enabled
       if (this.config.hideContentDuringInit) {
         this.hideContentDuringInitialization();
       }
       
-      console.log('🎯 Workflow Executor: Initialized');
+      console.log('🎯 Workflow Executor: Initialized (LEGACY SYSTEM)');
     }
 
     getPageContext() {
@@ -1030,20 +1032,37 @@
   // Global API
   window.WorkflowExecutor = WorkflowExecutor;
 
-  // Auto-initialize only if not disabled
-  if (!window.DISABLE_LEGACY_WORKFLOWS && !window.workflowExecutor) {
-    window.workflowExecutor = new WorkflowExecutor();
+  // Auto-initialize only if not disabled and no unified system exists
+  if (!window.DISABLE_LEGACY_WORKFLOWS && !window.workflowExecutor && !window.workflowSystem) {
+    console.log('🎯 Workflow Executor: No unified system detected, initializing legacy system...');
     
-    // Initialize after DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        window.workflowExecutor.initialize();
-      });
+    const instance = new WorkflowExecutor();
+    
+    // Only proceed if instance was created successfully (not null)
+    if (instance && !instance.isLegacySystem === false) {
+      window.workflowExecutor = instance;
+      
+      // Initialize after DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+          if (window.workflowExecutor && typeof window.workflowExecutor.initialize === 'function') {
+            window.workflowExecutor.initialize();
+          }
+        });
+      } else {
+        if (window.workflowExecutor && typeof window.workflowExecutor.initialize === 'function') {
+          window.workflowExecutor.initialize();
+        }
+      }
     } else {
-      window.workflowExecutor.initialize();
+      console.log('🎯 Workflow Executor: Failed to create instance (conflicts detected)');
     }
+  } else if (window.workflowSystem) {
+    console.log('🎯 Workflow Executor: Unified workflow system detected, skipping legacy initialization');
   } else if (window.DISABLE_LEGACY_WORKFLOWS) {
     console.log('🎯 Workflow Executor: Legacy workflows disabled, skipping auto-initialization');
+  } else if (window.workflowExecutor) {
+    console.log('🎯 Workflow Executor: Instance already exists, skipping auto-initialization');
   }
 
 })(); 

@@ -24,7 +24,7 @@
       };
       
       this.workflows = new Map();
-      this.executedActions = new Set();
+      this.executedActions = new Map(); // Changed to Map to support recent duplicate prevention
       this.executedWorkflows = new Set(); // Track executed workflows to prevent duplicates
       this.triggeredWorkflows = new Map(); // Cache triggered workflows to prevent re-triggering
       this.processingWorkflows = false; // Flag to prevent recursive processWorkflows calls
@@ -40,6 +40,7 @@
       this.mutationObserver = null; // For dynamic content tracking
       this.lastScrollCheck = 0; // Throttle scroll events
       this.lastTimeCheck = 0; // Throttle time-based triggers
+      this.initializationPromise = null; // Track initialization state
       
       // Auto-hide content if enabled and anti-flicker script hasn't already done it
       if (this.config.hideContentDuringInit && !window.unifiedWorkflowAntiFlicker?.isContentHidden()) {
@@ -77,11 +78,25 @@
      * Initialize the workflow system
      */
     async initialize() {
+      // Prevent multiple initializations
+      if (this.initializationPromise) {
+        this.log('⚠️ Initialization already in progress', 'warning');
+        return this.initializationPromise;
+      }
+      
       if (this.initialized) {
         this.log('⚠️ System already initialized', 'warning');
-        return;
+        return Promise.resolve();
       }
 
+      this.initializationPromise = this._doInitialize();
+      return this.initializationPromise;
+    }
+
+    /**
+     * Internal initialization method
+     */
+    async _doInitialize() {
       try {
         this.log('🚀 Initializing unified workflow system...');
         
@@ -113,6 +128,11 @@
         this.initialized = true;
         this.log('✅ Unified workflow system ready!', 'success');
         
+        // Register cleanup for page unload
+        window.addEventListener('beforeunload', () => {
+          this.cleanup();
+        });
+        
         // Dispatch ready event
         window.dispatchEvent(new CustomEvent('workflowSystemReady', {
           detail: { system: this }
@@ -122,6 +142,7 @@
         this.log(`❌ Initialization failed: ${error.message}`, 'error');
         console.error('Unified Workflow System Error:', error);
         this.showContent(); // Show content even if initialization fails
+        throw error;
       }
     }
 
@@ -134,13 +155,20 @@
         this.log(`📡 Fetching workflows from: ${url}`);
         
         // Prepare headers for API key authentication if available
-        const headers = {};
+        const headers = {
+          'Content-Type': 'application/json'
+        };
         if (this.config.apiKey) {
           headers['X-API-Key'] = this.config.apiKey;
           this.log('🔑 Using API key authentication');
         }
         
-        const response = await fetch(url, { headers });
+        const response = await fetch(url, { 
+          headers,
+          method: 'GET',
+          credentials: 'omit' // Don't send cookies for CORS
+        });
+        
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
@@ -191,16 +219,16 @@
      */
     waitForBody() {
       return new Promise((resolve) => {
-        if (document.body && document.body.nodeType === 1) {
+        if (document.body) {
           resolve();
           return;
         }
         
         const checkBody = () => {
-          if (document.body && document.body.nodeType === 1) {
+          if (document.body) {
             resolve();
           } else {
-            setTimeout(checkBody, 100);
+            requestAnimationFrame(checkBody);
           }
         };
         
@@ -222,56 +250,72 @@
         return;
       }
       
-      this.mutationObserver = new MutationObserver(mutations => {
-        // Prevent mutation observer from triggering workflow processing
-        // Only reapply existing content rules, don't trigger new workflows
-        let shouldReapply = false;
-        
-        mutations.forEach(mutation => {
-          if (mutation.type === 'childList' && mutation.addedNodes.length) {
-            mutation.addedNodes.forEach(node => {
-              if (node.nodeType !== Node.ELEMENT_NODE) return; // Not an element
-              
-              // Check if this is a relevant element for content replacement only
-              if (this.isRelevantElement(node)) {
-                shouldReapply = true;
-              }
-            });
-          }
-        });
-        
-        if (shouldReapply) {
-          this.log('New relevant elements detected, reapplying content rules only (no workflow triggers)');
-          // Only reapply content rules, don't process workflows
-          this.reapplyContentRules();
-        }
-      });
-      
       try {
         // Wait for body to be ready
         await this.waitForBody();
         
-        if (!document.body || document.body.nodeType !== 1) {
+        if (!document.body) {
           this.log('Document body still not ready after waiting', 'warning');
           return;
         }
         
-        // Validate that we have a valid MutationObserver and body
-        if (!this.mutationObserver || typeof this.mutationObserver.observe !== 'function') {
-          this.log('Invalid MutationObserver instance', 'error');
-          return;
-        }
+        this.mutationObserver = new MutationObserver(mutations => {
+          // Throttle mutation processing to prevent performance issues
+          this.throttledHandleMutations(mutations);
+        });
         
         // Start observing with proper validation
         this.mutationObserver.observe(document.body, { 
           childList: true, 
-          subtree: true 
+          subtree: true,
+          attributes: false // Don't watch attributes to reduce noise
         });
         this.log('Mutation observer setup for dynamic content (content replacement only)');
         
       } catch (error) {
         this.log('Failed to setup mutation observer: ' + error.message, 'error');
         this.mutationObserver = null;
+      }
+    }
+
+    /**
+     * Throttled mutation handler to prevent performance issues
+     */
+    throttledHandleMutations(mutations) {
+      if (this._mutationTimeout) {
+        clearTimeout(this._mutationTimeout);
+      }
+      
+      this._mutationTimeout = setTimeout(() => {
+        this.handleMutations(mutations);
+      }, 250); // 250ms delay to batch mutations
+    }
+
+    /**
+     * Handle mutations from mutation observer
+     */
+    handleMutations(mutations) {
+      // Prevent mutation observer from triggering workflow processing
+      // Only reapply existing content rules, don't trigger new workflows
+      let shouldReapply = false;
+      
+      mutations.forEach(mutation => {
+        if (mutation.type === 'childList' && mutation.addedNodes.length) {
+          mutation.addedNodes.forEach(node => {
+            if (node.nodeType !== Node.ELEMENT_NODE) return; // Not an element
+            
+            // Check if this is a relevant element for content replacement only
+            if (this.isRelevantElement(node)) {
+              shouldReapply = true;
+            }
+          });
+        }
+      });
+      
+      if (shouldReapply) {
+        this.log('New relevant elements detected, reapplying content rules only (no workflow triggers)');
+        // Only reapply content rules, don't process workflows
+        this.reapplyContentRules();
       }
     }
 
@@ -404,9 +448,16 @@
      * Set up event listeners for dynamic triggers
      */
     setupEventListeners() {
+      // Prevent duplicate event listener setup
+      if (this._eventListenersSetup) {
+        this.log('⚠️ Event listeners already setup, skipping', 'warning');
+        return;
+      }
+      this._eventListenersSetup = true;
+      
       // Scroll depth tracking with proper throttling
       let scrollTimeout;
-      window.addEventListener('scroll', () => {
+      const scrollHandler = () => {
         clearTimeout(scrollTimeout);
         scrollTimeout = setTimeout(() => {
           const now = Date.now();
@@ -416,9 +467,12 @@
           }
           this.lastScrollCheck = now;
           
-          const scrollPercentage = Math.round(
-            (window.scrollY / (document.documentElement.scrollHeight - window.innerHeight)) * 100
-          );
+          const scrollTop = window.scrollY || document.documentElement.scrollTop;
+          const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+          
+          if (scrollHeight <= 0) return; // Prevent division by zero
+          
+          const scrollPercentage = Math.min(100, Math.round((scrollTop / scrollHeight) * 100));
           
           // Only trigger on meaningful scroll milestones
           if (scrollPercentage >= 25 && scrollPercentage % 25 === 0) {
@@ -429,11 +483,13 @@
             });
           }
         }, 500); // Increased throttle to 500ms
-      });
+      };
+      
+      window.addEventListener('scroll', scrollHandler, { passive: true });
 
       // Time on page tracking - much less frequent and with caching
       let timeOnPage = 0;
-      const timeInterval = setInterval(() => {
+      this._timeInterval = setInterval(() => {
         timeOnPage += 10; // Increment by 10 seconds
         const now = Date.now();
         
@@ -453,28 +509,39 @@
         }
       }, 10000); // Check every 10 seconds instead of every second
 
-      // Click tracking - single execution per click
-      document.addEventListener('click', (event) => {
-        const selector = this.generateSelector(event.target);
-        const clickKey = `click-${selector}-${Date.now()}`;
+      // Click tracking - single execution per click with debouncing
+      let lastClickTime = 0;
+      const clickHandler = (event) => {
+        const now = Date.now();
         
-        // Prevent duplicate click events
+        // Debounce rapid clicks
+        if (now - lastClickTime < 100) {
+          return;
+        }
+        lastClickTime = now;
+        
+        const selector = this.generateSelector(event.target);
+        const clickKey = `click-${selector}-${Math.floor(now / 1000)}`; // Group by second
+        
+        // Prevent duplicate click events within same second
         if (this.executedActions.has(clickKey)) {
           return;
         }
-        this.executedActions.add(clickKey);
+        this.executedActions.set(clickKey, now);
         
         this.handleEvent({
           eventType: 'click',
           elementSelector: selector,
           element: event.target,
-          timestamp: Date.now()
+          timestamp: now
         });
-      });
+      };
+      
+      document.addEventListener('click', clickHandler, { passive: true });
 
       // Exit intent detection - only once per session
       let exitIntentTriggered = false;
-      document.addEventListener('mouseleave', (event) => {
+      const exitIntentHandler = (event) => {
         if (event.clientY <= 0 && !exitIntentTriggered) {
           exitIntentTriggered = true;
           this.handleEvent({
@@ -482,9 +549,67 @@
             timestamp: Date.now()
           });
         }
-      });
+      };
+      
+      document.addEventListener('mouseleave', exitIntentHandler);
 
-      this.log('👂 Event listeners configured with proper throttling');
+      // Store cleanup function
+      this._cleanup = () => {
+        window.removeEventListener('scroll', scrollHandler);
+        document.removeEventListener('click', clickHandler);
+        document.removeEventListener('mouseleave', exitIntentHandler);
+        if (this._timeInterval) {
+          clearInterval(this._timeInterval);
+          this._timeInterval = null;
+        }
+      };
+
+      this.log('👂 Event listeners configured with proper throttling and cleanup');
+    }
+
+    /**
+     * Clean up event listeners and intervals
+     */
+    cleanup() {
+      this.log('🧹 Starting cleanup...');
+      
+      if (this._cleanup) {
+        this._cleanup();
+        this._cleanup = null;
+      }
+      
+      if (this.mutationObserver) {
+        this.mutationObserver.disconnect();
+        this.mutationObserver = null;
+      }
+      
+      if (this._mutationTimeout) {
+        clearTimeout(this._mutationTimeout);
+        this._mutationTimeout = null;
+      }
+      
+      if (this._safetyTimeout) {
+        clearTimeout(this._safetyTimeout);
+        this._safetyTimeout = null;
+      }
+      
+      // Clear all tracking data structures
+      this.workflows.clear();
+      this.executedActions.clear();
+      this.executedWorkflows.clear();
+      this.triggeredWorkflows.clear();
+      this.elementsToWaitFor.clear();
+      this.completedModifications.clear();
+      this.processedSelectors.clear();
+      this.selectorRulesMap.clear();
+      
+      // Reset flags
+      this.initialized = false;
+      this.processingWorkflows = false;
+      this.contentHidden = false;
+      this.loadingIndicatorShown = false;
+      
+      this.log('🧹 Cleaned up all listeners, timers, and data structures');
     }
 
     /**
@@ -823,13 +948,21 @@
      * Execute a single action
      */
     async executeAction(action) {
-      const actionKey = `${action.id}-${Date.now()}`;
+      // Create a more specific action key to prevent unnecessary duplicates
+      const actionKey = `${action.id}-${action.name}-${JSON.stringify(action.config)}`;
       
-      // Prevent duplicate executions
-      if (this.executedActions.has(actionKey)) {
-        return { success: false, reason: 'already_executed' };
+      // Check for recent duplicate executions (within last 5 seconds)
+      const recentKey = `recent-${actionKey}`;
+      const now = Date.now();
+      const lastExecution = this.executedActions.get(recentKey);
+      
+      if (lastExecution && (now - lastExecution) < 5000) {
+        this.log(`⚠️ Skipping recent duplicate action: ${action.name}`, 'warning');
+        return { success: false, reason: 'recent_duplicate', lastExecution };
       }
-      this.executedActions.add(actionKey);
+      
+      // Mark action as being executed
+      this.executedActions.set(recentKey, now);
       
       const { config = {}, name } = action;
       this.log(`⚡ Executing: ${name}`, config);
@@ -876,6 +1009,12 @@
             result = { success: false, error: `Unknown action: ${name}` };
         }
         
+        if (result.success) {
+          this.log(`✅ Action completed: ${name}`, 'success');
+        } else {
+          this.log(`⚠️ Action unsuccessful: ${name} - ${result.error || 'Unknown reason'}`, 'warning');
+        }
+        
         return result;
         
       } catch (error) {
@@ -887,10 +1026,22 @@
     // Action implementations
     async replaceText(config) {
       try {
-        // Wait for elements to be available
-        await this.waitForElement(config.selector);
+        if (!config.selector) {
+          return { success: false, error: 'No selector provided' };
+        }
         
-        // Use the robust replacement logic from utm-magic.js
+        // Wait for elements to be available (but don't fail if timeout)
+        const element = await this.waitForElement(config.selector);
+        
+        // Try to find elements even if waitForElement timed out
+        const elements = document.querySelectorAll(config.selector);
+        
+        if (!elements || elements.length === 0) {
+          this.log(`⚠️ No elements found for selector: ${config.selector}`, 'warning');
+          return { success: false, error: 'No elements found' };
+        }
+        
+        // Use the robust replacement logic
         const success = this.applySingleSelector(config.selector, {
           newText: config.newText,
           originalText: config.originalText
@@ -899,10 +1050,10 @@
         if (success) {
           this.completedModifications.add(`replaceText:${config.selector}`);
           this.log(`✅ Text replaced successfully (${config.selector})`, 'success');
-          return { success: true };
+          return { success: true, elementsModified: elements.length };
         } else {
-          this.log(`⚠️ No elements found or replacement failed (${config.selector})`, 'warning');
-          return { success: false, error: 'No elements found' };
+          this.log(`⚠️ Text replacement failed (${config.selector})`, 'warning');
+          return { success: false, error: 'Replacement operation failed' };
         }
         
       } catch (error) {
@@ -1255,52 +1406,105 @@
 
         this.log(`⏳ Waiting for element: ${selector} (timeout: ${actualTimeout}ms)`);
 
-        const observer = new MutationObserver(() => {
+        let observer = null;
+        let timeoutId = null;
+        let bodyObserver = null;
+        
+        const cleanup = () => {
+          if (observer) {
+            observer.disconnect();
+            observer = null;
+          }
+          if (bodyObserver) {
+            bodyObserver.disconnect();
+            bodyObserver = null;
+          }
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+          this.elementsToWaitFor.delete(selector);
+        };
+
+        const checkElement = () => {
           const element = document.querySelector(selector);
           if (element) {
-            observer.disconnect();
-            this.elementsToWaitFor.delete(selector);
+            cleanup();
             this.log(`✅ Element appeared: ${selector}`);
             resolve(element);
+            return true;
+          }
+          return false;
+        };
+
+        observer = new MutationObserver((mutations) => {
+          // Throttle mutation checking to prevent performance issues
+          if (!checkElement()) {
+            // If element still not found, check if any relevant nodes were added
+            let hasRelevantChanges = false;
+            mutations.forEach(mutation => {
+              if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                hasRelevantChanges = true;
+              }
+            });
+            
+            if (!hasRelevantChanges) return; // Skip if no relevant changes
           }
         });
 
-        // Observe with more comprehensive options
+        // Observe with minimal options for better performance
         const observeOptions = { 
           childList: true, 
-          subtree: true, 
-          attributes: true, 
-          attributeOldValue: true 
+          subtree: true
         };
 
         // Start observing - handle case where body might not exist yet
         if (document.body) {
           observer.observe(document.body, observeOptions);
         } else {
-          // If body doesn't exist, wait for it
-          const bodyObserver = new MutationObserver(() => {
+          // If body doesn't exist, wait for it with timeout
+          bodyObserver = new MutationObserver(() => {
             if (document.body) {
               bodyObserver.disconnect();
-              observer.observe(document.body, observeOptions);
+              bodyObserver = null;
+              if (observer && !checkElement()) {
+                observer.observe(document.body, observeOptions);
+              }
             }
           });
-          bodyObserver.observe(document.documentElement, { childList: true });
+          
+          try {
+            bodyObserver.observe(document.documentElement, { childList: true });
+          } catch (bodyError) {
+            this.log(`❌ Failed to observe documentElement: ${bodyError.message}`, 'error');
+            cleanup();
+            reject(new Error(`Failed to setup element waiting for ${selector}`));
+            return;
+          }
         }
         
-        setTimeout(() => {
-          observer.disconnect();
-          this.elementsToWaitFor.delete(selector);
-          this.log(`❌ Element timeout: ${selector} not found within ${actualTimeout}ms`, 'error');
-          reject(new Error(`Element ${selector} not found within ${actualTimeout}ms`));
+        // Set timeout
+        timeoutId = setTimeout(() => {
+          cleanup();
+          this.log(`❌ Element timeout: ${selector} not found within ${actualTimeout}ms`, 'warning');
+          // Don't reject - resolve with null to allow workflow to continue
+          resolve(null);
         }, actualTimeout);
       });
     }
 
     safeHideContent() {
+      // Check if anti-flicker script already handled this
+      if (window.unifiedWorkflowAntiFlicker?.isContentHidden()) {
+        this.contentHidden = true;
+        this.log('🙈 Content already hidden by anti-flicker script');
+        return;
+      }
+      
       // Wait for body to be available
       if (!document.body) {
-        // If body not ready, wait a bit and try again
-        setTimeout(() => this.safeHideContent(), 10);
+        // Use requestAnimationFrame for better performance
+        requestAnimationFrame(() => this.safeHideContent());
         return;
       }
       this.hideContent();
@@ -1308,6 +1512,13 @@
 
     hideContent() {
       if (this.contentHidden) return;
+      
+      // Check if anti-flicker script already handled this
+      if (window.unifiedWorkflowAntiFlicker?.isContentHidden()) {
+        this.contentHidden = true;
+        this.log('🙈 Content already hidden by anti-flicker script');
+        return;
+      }
       
       // Check if document.body exists
       if (!document.body) {
@@ -1321,21 +1532,27 @@
       document.body.style.transition = 'opacity 0.3s ease';
       this.contentHidden = true;
       
-      // Show loading indicator if enabled
-      if (this.config.showLoadingIndicator) {
+      // Show loading indicator if enabled and not already shown
+      if (this.config.showLoadingIndicator && !window.unifiedWorkflowAntiFlicker?.isLoadingIndicatorShown()) {
         this.showLoadingIndicator();
       }
       
       this.log('🙈 Content hidden during workflow initialization');
       
       // Safety timeout to show content regardless
-      setTimeout(() => {
+      this._safetyTimeout = setTimeout(() => {
         this.log('⏰ Safety timeout reached, showing content', 'warning');
         this.showContent();
       }, this.config.maxInitTime);
     }
 
     showContent() {
+      // Clear safety timeout
+      if (this._safetyTimeout) {
+        clearTimeout(this._safetyTimeout);
+        this._safetyTimeout = null;
+      }
+      
       // Use anti-flicker script if available, otherwise use built-in method
       if (window.unifiedWorkflowAntiFlicker) {
         window.unifiedWorkflowAntiFlicker.showContent();
@@ -1515,8 +1732,8 @@
     return;
   }
 
-  // Auto-initialize if not already done and not disabled
-  if (!window.DISABLE_LEGACY_WORKFLOWS) {
+  // Auto-initialize only if not explicitly disabled and no existing instance
+  if (!window.DISABLE_LEGACY_WORKFLOWS && !window.workflowSystem) {
     // Disable other workflow systems to prevent conflicts
     window.DISABLE_LEGACY_WORKFLOWS = true;
     
@@ -1528,95 +1745,81 @@
       return;
     }
     
-    window.workflowSystem = new UnifiedWorkflowSystem();
+    // Check if configuration is available from the Railway server integration
+    const config = window.TRACKFLOW_CONFIG || {};
     
-    // Track initialization state
-    let priorityInitComplete = false;
-    let fullInitComplete = false;
+    // Create instance but don't auto-initialize (will be done by Railway server script)
+    window.workflowSystem = new UnifiedWorkflowSystem(config);
     
-    // Priority initialization for immediate content replacement
-    const priorityInit = async () => {
-      if (priorityInitComplete) {
-        console.log('🎯 Priority init already completed, skipping');
-        return;
-      }
+    console.log('✅ Unified Workflow System instance created and ready for external initialization');
+    
+    // Only auto-initialize if we're NOT being loaded by the Railway server
+    if (!window.TRACKFLOW_CONFIG) {
+      console.log('🎯 No external config detected, starting auto-initialization...');
       
-      try {
-        console.log('🎯 Starting priority initialization...');
-        priorityInitComplete = true;
-        
-        // Fetch workflows first, then execute priority actions
-        await window.workflowSystem.fetchWorkflows();
-        console.log(`🎯 Priority init: ${window.workflowSystem.workflows.size} workflows loaded`);
-        
-        if (window.workflowSystem.workflows.size > 0) {
-          await window.workflowSystem.executePriorityActions();
-        } else {
-          console.warn('🎯 Priority init: No workflows found, skipping priority execution');
-        }
-      } catch (error) {
-        console.error('🎯 Priority initialization failed:', error);
-        priorityInitComplete = false; // Reset on failure
-      }
-    };
-    
-    // Full initialization 
-    const fullInit = async () => {
-      if (fullInitComplete) {
-        console.log('🎯 Full init already completed, skipping');
-        return;
-      }
+      // Track initialization state
+      let initializationStarted = false;
       
-      try {
-        console.log('🎯 Starting full initialization...');
-        fullInitComplete = true;
-        
-        // Wait for priority init to complete first
-        while (!priorityInitComplete) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+      const startInitialization = async () => {
+        if (initializationStarted) {
+          console.log('🎯 Initialization already started, skipping');
+          return;
         }
         
-        await window.workflowSystem.initialize();
-      } catch (error) {
-        console.error('🎯 Full initialization failed:', error);
-        fullInitComplete = false; // Reset on failure
+        initializationStarted = true;
         
-        // Ensure content is shown even if initialization fails
-        if (document.documentElement.style.opacity === '0') {
-          document.documentElement.style.opacity = '1';
-          console.log('🎯 Content shown after initialization failure');
+        try {
+          console.log('🎯 Starting unified workflow system initialization...');
+          await window.workflowSystem.initialize();
+          console.log('✅ Unified workflow system initialized successfully');
+        } catch (error) {
+          console.error('❌ Unified workflow system initialization failed:', error);
+          
+          // Ensure content is shown even if initialization fails
+          if (window.workflowSystem && typeof window.workflowSystem.showContent === 'function') {
+            window.workflowSystem.showContent();
+          } else if (window.unifiedWorkflowAntiFlicker) {
+            window.unifiedWorkflowAntiFlicker.showContent();
+          } else {
+            // Fallback content reveal
+            if (document.body) {
+              document.body.style.visibility = 'visible';
+              document.body.style.opacity = '1';
+            }
+          }
         }
-      }
-    };
-    
-    // Initialize when DOM is ready, with priority execution
-    if (document.readyState === 'loading') {
-      // Use requestIdleCallback with timeout for priority if available
-      if (window.requestIdleCallback) {
-        requestIdleCallback(() => priorityInit().catch(console.error), { timeout: 500 });
+      };
+      
+      // Initialize when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startInitialization, { once: true });
       } else {
-        setTimeout(() => priorityInit().catch(console.error), 0);
+        // Document already loaded - start immediately
+        setTimeout(startInitialization, 0);
       }
       
-      // Full initialization on DOMContentLoaded
-      document.addEventListener('DOMContentLoaded', () => {
-        fullInit().catch(console.error);
-      }, { once: true });
-    } else {
-      // Document already loaded - run priority init then full init
-      priorityInit().then(() => fullInit()).catch(console.error);
-    }
-    
-    // Safety timeout to ensure content is shown even if everything fails
-    setTimeout(() => {
-      if (!fullInitComplete) {
-        console.warn('🎯 Unified Workflow System: Safety timeout reached, showing content');
-        if (document.body && document.body.style.visibility === 'hidden') {
-          document.body.style.visibility = 'visible';
-          document.body.style.opacity = '1';
+      // Safety timeout to ensure content is shown even if everything fails
+      setTimeout(() => {
+        if (!initializationStarted) {
+          console.warn('🎯 Unified Workflow System: Safety timeout reached, forcing content reveal');
+          if (window.workflowSystem && typeof window.workflowSystem.showContent === 'function') {
+            window.workflowSystem.showContent();
+          } else if (window.unifiedWorkflowAntiFlicker) {
+            window.unifiedWorkflowAntiFlicker.showContent();
+          } else {
+            // Fallback content reveal
+            if (document.body) {
+              document.body.style.visibility = 'visible';
+              document.body.style.opacity = '1';
+            }
+          }
         }
-      }
-    }, 10000); // 10 second safety timeout
+      }, 10000); // 10 second safety timeout
+    }
+  } else if (window.workflowSystem) {
+    console.log('🎯 Unified Workflow System: Instance already exists, skipping auto-initialization');
+  } else if (window.DISABLE_LEGACY_WORKFLOWS) {
+    console.log('🎯 Unified Workflow System: Legacy workflows disabled, skipping auto-initialization');
   }
   
   // Export UnifiedWorkflowSystem to global scope

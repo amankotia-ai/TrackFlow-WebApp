@@ -176,8 +176,15 @@
     hideContent();
   } else {
     // Document already loaded, check if we should still hide
-    if (!window.workflowSystem || !window.workflowSystem.initialized) {
+    // Hide content if no workflow system exists or if it's not initialized
+    const shouldHide = !window.workflowSystem || 
+                      !window.workflowSystem.initialized ||
+                      (window.TRACKFLOW_CONFIG && !window.workflowSystem);
+                      
+    if (shouldHide) {
       hideContent();
+    } else {
+      log('👀 Workflow system already initialized, content not hidden');
     }
   }
   

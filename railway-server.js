@@ -218,7 +218,26 @@ app.get('/api/unified-workflow-system.js', (req, res) => {
         window.workflowSystem = new UnifiedWorkflowSystem({
           ...window.TRACKFLOW_CONFIG
         });
-        console.log('✅ TrackFlow: Unified workflow system initialized (includes tracking)');
+        
+        // Actually initialize the system
+        if (window.workflowSystem && typeof window.workflowSystem.initialize === 'function') {
+          console.log('🎯 TrackFlow: Initializing unified workflow system...');
+          window.workflowSystem.initialize().then(() => {
+            console.log('✅ TrackFlow: Unified workflow system fully initialized');
+          }).catch(error => {
+            console.error('❌ TrackFlow: Unified workflow system initialization failed:', error);
+            // Ensure content is shown even on failure
+            if (window.workflowSystem.showContent) {
+              window.workflowSystem.showContent();
+            } else if (window.unifiedWorkflowAntiFlicker) {
+              window.unifiedWorkflowAntiFlicker.showContent();
+            }
+          });
+        } else {
+          console.error('❌ TrackFlow: UnifiedWorkflowSystem instance missing initialize method');
+        }
+        
+        console.log('✅ TrackFlow: Unified workflow system instance created');
       } else {
         console.log('🎯 TrackFlow: Workflow system already exists, skipping initialization');
         console.log('  - window.workflowSystem:', !!window.workflowSystem);
