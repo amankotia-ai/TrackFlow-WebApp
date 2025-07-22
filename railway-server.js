@@ -443,50 +443,107 @@ app.post('/api/analytics/track', async (req, res) => {
           const visitorId = event.visitorId || 
             `visitor_${sessionId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-          // Use comprehensive tracking function
-          const { data: eventId, error } = await supabase.rpc('track_visitor_event', {
-            p_session_id: sessionId,
-            p_visitor_id: visitorId,
-            p_user_id: null, // Anonymous for now - could be set if authenticated
-            p_event_type: eventType,
-            p_page_url: pageUrl,
-            p_page_title: event.pageContext?.title || event.element?.title,
-            p_referrer_url: event.pageContext?.referrer,
-            p_utm_source: utmParams.utm_source,
-            p_utm_medium: utmParams.utm_medium,
-            p_utm_campaign: utmParams.utm_campaign,
-            p_utm_content: utmParams.utm_content,
-            p_utm_term: utmParams.utm_term,
-            p_device_type: deviceType,
-            p_browser_name: event.userContext?.browserName,
-            p_browser_version: event.userContext?.browserVersion,
-            p_operating_system: event.userContext?.platform || event.userContext?.os,
-            p_screen_resolution: event.userContext?.screen ? 
-              `${event.userContext.screen.width}x${event.userContext.screen.height}` : null,
-            p_viewport_size: event.userContext?.viewport ? 
-              `${event.userContext.viewport.width}x${event.userContext.viewport.height}` : null,
-            p_user_agent: userAgent,
-            p_ip_address: req.ip || req.connection.remoteAddress,
-            p_country_code: req.headers['cf-ipcountry'] || null, // Cloudflare country
-            p_city: null, // Could be added with geolocation service
-            p_element_selector: event.elementSelector || event.element?.className,
-            p_element_text: event.elementText || event.element?.textContent || event.eventData?.elementText,
-            p_element_attributes: event.eventData?.elementAttributes || event.element || {},
-            p_form_data: event.eventData?.formData || event.eventData?.formFields || {},
-            p_scroll_depth: event.eventData?.scrollDepth || 0,
-            p_time_on_page: event.eventData?.timeOnPage || 0,
-            p_conversion_value: event.eventData?.conversionValue || null,
-            p_custom_properties: {
-              ...event.eventData,
-              originalEvent: event
-            }
-          });
+          // Try comprehensive tracking function, fallback to direct insert if fails
+          let eventId = null;
+          try {
+            const { data, error } = await supabase.rpc('track_visitor_event', {
+              p_session_id: sessionId,
+              p_visitor_id: visitorId,
+              p_user_id: null, // Anonymous for now - could be set if authenticated
+              p_event_type: eventType,
+              p_page_url: pageUrl,
+              p_page_title: event.pageContext?.title || event.element?.title,
+              p_referrer_url: event.pageContext?.referrer,
+              p_utm_source: utmParams.utm_source,
+              p_utm_medium: utmParams.utm_medium,
+              p_utm_campaign: utmParams.utm_campaign,
+              p_utm_content: utmParams.utm_content,
+              p_utm_term: utmParams.utm_term,
+              p_device_type: deviceType,
+              p_browser_name: event.userContext?.browserName,
+              p_browser_version: event.userContext?.browserVersion,
+              p_operating_system: event.userContext?.platform || event.userContext?.os,
+              p_screen_resolution: event.userContext?.screen ? 
+                `${event.userContext.screen.width}x${event.userContext.screen.height}` : null,
+              p_viewport_size: event.userContext?.viewport ? 
+                `${event.userContext.viewport.width}x${event.userContext.viewport.height}` : null,
+                             p_user_agent: userAgent,
+               p_ip_address: null, // Skip IP for now due to INET type issues
+               p_country_code: req.headers['cf-ipcountry'] || null, // Cloudflare country
+              p_city: null, // Could be added with geolocation service
+              p_element_selector: event.elementSelector || event.element?.className,
+              p_element_text: event.elementText || event.element?.textContent || event.eventData?.elementText,
+              p_element_attributes: event.eventData?.elementAttributes || event.element || {},
+              p_form_data: event.eventData?.formData || event.eventData?.formFields || {},
+              p_scroll_depth: event.eventData?.scrollDepth || 0,
+              p_time_on_page: event.eventData?.timeOnPage || 0,
+              p_conversion_value: event.eventData?.conversionValue || null,
+              p_custom_properties: {
+                ...event.eventData,
+                originalEvent: event
+              }
+            });
 
-          if (error) {
-            console.error('❌ Error tracking visitor event:', error);
-          } else {
+            if (error) {
+              console.warn('⚠️ RPC tracking function failed, falling back to direct insert:', error.message);
+              
+              // Fallback to direct table insert
+              const { data: directInsert, error: directError } = await supabase
+                .from('visitor_events')
+                .insert({
+                  session_id: sessionId,
+                  visitor_id: visitorId,
+                  event_type: eventType,
+                  page_url: pageUrl,
+                  page_title: event.pageContext?.title || event.element?.title,
+                  referrer_url: event.pageContext?.referrer,
+                  utm_source: utmParams.utm_source,
+                  utm_medium: utmParams.utm_medium,
+                  utm_campaign: utmParams.utm_campaign,
+                  utm_content: utmParams.utm_content,
+                  utm_term: utmParams.utm_term,
+                  device_type: deviceType,
+                  browser_name: event.userContext?.browserName,
+                  browser_version: event.userContext?.browserVersion,
+                  operating_system: event.userContext?.platform || event.userContext?.os,
+                  screen_resolution: event.userContext?.screen ? 
+                    `${event.userContext.screen.width}x${event.userContext.screen.height}` : null,
+                  viewport_size: event.userContext?.viewport ? 
+                    `${event.userContext.viewport.width}x${event.userContext.viewport.height}` : null,
+                                     user_agent: userAgent,
+                   ip_address: null, // Skip IP for now due to INET type issues
+                   country_code: req.headers['cf-ipcountry'] || null,
+                  element_selector: event.elementSelector || event.element?.className,
+                  element_text: event.elementText || event.element?.textContent || event.eventData?.elementText,
+                  element_attributes: event.eventData?.elementAttributes || event.element || {},
+                  form_data: event.eventData?.formData || event.eventData?.formFields || {},
+                  scroll_depth: event.eventData?.scrollDepth || 0,
+                  time_on_page: event.eventData?.timeOnPage || 0,
+                  conversion_value: event.eventData?.conversionValue || null,
+                  custom_properties: {
+                    ...event.eventData,
+                    originalEvent: event
+                  }
+                })
+                .select('id')
+                .single();
+
+              if (directError) {
+                console.error('❌ Direct insert also failed:', directError);
+              } else {
+                eventId = directInsert.id;
+                console.log(`✅ Tracked event via direct insert: ${eventId} (${eventType})`);
+              }
+            } else {
+              eventId = data;
+              console.log(`✅ Tracked comprehensive event: ${eventId} (${eventType})`);
+            }
+          } catch (rpcError) {
+            console.error('❌ Error with comprehensive tracking:', rpcError);
+          }
+
+          if (eventId) {
             processedEvents.push({ eventId, originalEvent: event });
-            console.log(`✅ Tracked comprehensive event: ${eventId} (${eventType})`);
           }
 
           // Also save to legacy analytics_events table for backward compatibility
